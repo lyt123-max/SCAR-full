@@ -1,0 +1,56 @@
+# Python cache and local environments
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+venv/
+env/
+ENV/
+
+# Local editor and OS metadata
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Secrets and local configuration
+.env
+.env.*
+*.local
+
+# Runtime logs and temporary files
+*.log
+*.tmp
+*.temp
+tmp/
+temp/
+
+# Training datasets and generated artifacts
+dataset/
+TEP-DATA/
+artifacts/
+main-result/
+GECCO-ablation/
+TEP-abalation/
+lostdata/
+
+# Model checkpoints, numeric dumps, and retrieval indexes
+*.pt
+*.pth
+*.ckpt
+*.npy
+*.npz
+*.mat
+*.index
+*.faiss
+*.pkl
+*.pickle
+*.joblib
+*.h5
+*.hdf5
+
+# Build and packaging outputs
+build/
+dist/
+*.egg-info/

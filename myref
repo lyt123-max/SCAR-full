@@ -1,0 +1,517 @@
+@article{gupta2013outlier,
+  title={Outlier detection for temporal data: A survey},
+  author={Gupta, Manish and Gao, Jing and Aggarwal, Charu C and Han, Jiawei},
+  journal={IEEE Transactions on Knowledge and data Engineering},
+  volume={26},
+  number={9},
+  pages={2250--2267},
+  year={2013},
+  publisher={IEEE}
+}
+@inproceedings{qiu2012granger,
+  title={Granger causality for time-series anomaly detection},
+  author={Qiu, Huida and Liu, Yan and Subrahmanya, Niranjan A and Li, Weichang},
+  booktitle={2012 IEEE 12th international conference on data mining},
+  pages={1074--1079},
+  year={2012},
+  organization={IEEE}
+}
+@inproceedings{malhotra2015long,
+  title={Long short term memory networks for anomaly detection in time series},
+  author={Malhotra, Pankaj and Vig, Lovekesh and Shroff, Gautam and Agarwal, Puneet and others},
+  booktitle={Proceedings},
+  volume={89},
+  number={9},
+  pages={94},
+  year={2015}
+}
+@article{malhotra2016lstm,
+  title={LSTM-based encoder-decoder for multi-sensor anomaly detection},
+  author={Malhotra, Pankaj and Ramakrishnan, Anusha and Anand, Gaurangi and Vig, Lovekesh and Agarwal, Puneet and Shroff, Gautam},
+  journal={arXiv preprint arXiv:1607.00148},
+  year={2016}
+}
+@inproceedings{zhou2017anomaly,
+  title={Anomaly detection with robust deep autoencoders},
+  author={Zhou, Chong and Paffenroth, Randy C},
+  booktitle={Proceedings of the 23rd ACM SIGKDD international conference on knowledge discovery and data mining},
+  pages={665--674},
+  year={2017}
+}
+@article{park2018multimodal,
+  title={A multimodal anomaly detector for robot-assisted feeding using an lstm-based variational autoencoder},
+  author={Park, Daehyung and Hoshi, Yuuna and Kemp, Charles C},
+  journal={IEEE Robotics and Automation Letters},
+  volume={3},
+  number={3},
+  pages={1544--1551},
+  year={2018},
+  publisher={IEEE}
+}
+@inproceedings{zong2018deep,
+  title={Deep autoencoding gaussian mixture model for unsupervised anomaly detection},
+  author={Zong, Bo and Song, Qi and Min, Martin Renqiang and Cheng, Wei and Lumezanu, Cristian and Cho, Daeki and Chen, Haifeng},
+  booktitle={International conference on learning representations},
+  year={2018}
+}
+@inproceedings{ruff2018deep,
+  title={Deep one-class classification},
+  author={Ruff, Lukas and Vandermeulen, Robert and Goernitz, Nico and Deecke, Lucas and Siddiqui, Shoaib Ahmed and Binder, Alexander and M{\"u}ller, Emmanuel and Kloft, Marius},
+  booktitle={International conference on machine learning},
+  pages={4393--4402},
+  year={2018},
+  organization={PMLR}
+}
+@inproceedings{zhang2019deep,
+  title={A deep neural network for unsupervised anomaly detection and diagnosis in multivariate time series data},
+  author={Zhang, Chuxu and Song, Dongjin and Chen, Yuncong and Feng, Xinyang and Lumezanu, Cristian and Cheng, Wei and Ni, Jingchao and Zong, Bo and Chen, Haifeng and Chawla, Nitesh V},
+  booktitle={Proceedings of the AAAI conference on artificial intelligence},
+  volume={33},
+  number={01},
+  pages={1409--1416},
+  year={2019}
+}
+@inproceedings{park2020learning,
+  title={Learning memory-guided normality for anomaly detection},
+  author={Park, Hyunjong and Noh, Jongyoun and Ham, Bumsub},
+  booktitle={Proceedings of the IEEE/CVF conference on computer vision and pattern recognition},
+  pages={14372--14381},
+  year={2020}
+}
+@inproceedings{ilse2020diva,
+  title={Diva: Domain invariant variational autoencoders},
+  author={Ilse, Maximilian and Tomczak, Jakub M and Louizos, Christos and Welling, Max},
+  booktitle={Medical imaging with deep learning},
+  pages={322--348},
+  year={2020},
+  organization={PMLR}
+}
+@article{shen2020timeseries,
+  title={Timeseries anomaly detection using temporal hierarchical one-class network},
+  author={Shen, Lifeng and Li, Zhuocong and Kwok, James},
+  journal={Advances in neural information processing systems},
+  volume={33},
+  pages={13016--13026},
+  year={2020}
+}
+@inproceedings{li2021multivariate,
+  title={Multivariate time series anomaly detection and interpretation using hierarchical inter-metric and temporal embedding},
+  author={Li, Zhihan and Zhao, Youjian and Han, Jiaqi and Su, Ya and Jiao, Rui and Wen, Xidao and Pei, Dan},
+  booktitle={Proceedings of the 27th ACM SIGKDD conference on knowledge discovery \& data mining},
+  pages={3220--3230},
+  year={2021}
+}
+@article{jacob2020exathlon,
+  title={Exathlon: A benchmark for explainable anomaly detection over time series},
+  author={Jacob, Vincent and Song, Fei and Stiegler, Arnaud and Rad, Bijan and Diao, Yanlei and Tatbul, Nesime},
+  journal={arXiv preprint arXiv:2010.05073},
+  year={2020}
+}
+@article{zamanzadeh2024deep,
+  title={Deep learning for time series anomaly detection: A survey},
+  author={Zamanzadeh Darban, Zahra and Webb, Geoffrey I and Pan, Shirui and Aggarwal, Charu and Salehi, Mahsa},
+  journal={ACM Computing Surveys},
+  volume={57},
+  number={1},
+  pages={1--42},
+  year={2024},
+  publisher={ACM New York, NY}
+}
+@inproceedings{kieu2022anomaly,
+  title={Anomaly detection in time series with robust variational quasi-recurrent autoencoders},
+  author={Kieu, Tung and Yang, Bin and Guo, Chenjuan and Cirstea, Razvan-Gabriel and Zhao, Yan and Song, Yale and Jensen, Christian S},
+  booktitle={2022 IEEE 38th international conference on data engineering (ICDE)},
+  pages={1342--1354},
+  year={2022},
+  organization={IEEE}
+}
+@inproceedings{kieu2022robust,
+  title={Robust and explainable autoencoders for unsupervised time series outlier detection},
+  author={Kieu, Tung and Yang, Bin and Guo, Chenjuan and Jensen, Christian S and Zhao, Yan and Huang, Feiteng and Zheng, Kai},
+  booktitle={2022 IEEE 38th International conference on data engineering (ICDE)},
+  pages={3038--3050},
+  year={2022},
+  organization={IEEE}
+}
+@inproceedings{kim2022towards,
+  title={Towards a rigorous evaluation of time-series anomaly detection},
+  author={Kim, Siwon and Choi, Kukjin and Choi, Hyun-Soo and Lee, Byunghan and Yoon, Sungroh},
+  booktitle={Proceedings of the AAAI conference on artificial intelligence},
+  volume={36},
+  number={7},
+  pages={7194--7201},
+  year={2022}
+}
+@inproceedings{huet2022local,
+  title={Local evaluation of time series anomaly detection algorithms},
+  author={Huet, Alexis and Navarro, Jose Manuel and Rossi, Dario},
+  booktitle={Proceedings of the 28th ACM SIGKDD Conference on Knowledge Discovery and Data Mining},
+  pages={635--645},
+  year={2022}
+}
+@article{boniol2022theseus,
+  title={Theseus: Navigating the Labyrinth of Time-Series Anomaly Detection.},
+  author={Boniol, Paul and Paparrizos, John and Kang, Yuhao and Palpanas, Themis and Tsay, Ruey S and Elmore, Aaron J and Franklin, Michael J},
+  journal={Proc. VLDB Endow.},
+  volume={15},
+  number={12},
+  pages={3702--3705},
+  year={2022}
+}
+@inproceedings{yang2023dcdetector,
+  title={Dcdetector: Dual attention contrastive representation learning for time series anomaly detection},
+  author={Yang, Yiyuan and Zhang, Chaoli and Zhou, Tian and Wen, Qingsong and Sun, Liang},
+  booktitle={Proceedings of the 29th ACM SIGKDD conference on knowledge discovery and data mining},
+  pages={3033--3045},
+  year={2023}
+}
+@article{wang2023drift,
+  title={Drift doesn't matter: Dynamic decomposition with diffusion reconstruction for unstable multivariate time series anomaly detection},
+  author={Wang, Chengsen and Zhuang, Zirui and Qi, Qi and Wang, Jingyu and Wang, Xingyu and Sun, Haifeng and Liao, Jianxin},
+  journal={Advances in neural information processing systems},
+  volume={36},
+  pages={10758--10774},
+  year={2023}
+}
+@article{zhang2024graph,
+  title={Graph structure change-based anomaly detection in multivariate time series of industrial processes},
+  author={Zhang, Zhen and Geng, Zhiqiang and Han, Yongming},
+  journal={IEEE Transactions on Industrial Informatics},
+  volume={20},
+  number={4},
+  pages={6457--6466},
+  year={2024},
+  publisher={IEEE}
+}
+@article{kong2024causalformer,
+  title={Causalformer: An interpretable transformer for temporal causal discovery},
+  author={Kong, Lingbai and Li, Wengen and Yang, Hanchen and Zhang, Yichao and Guan, Jihong and Zhou, Shuigeng},
+  journal={IEEE Transactions on Knowledge and Data Engineering},
+  volume={37},
+  number={1},
+  pages={102--115},
+  year={2024},
+  publisher={IEEE}
+}
+@article{schmidl2022anomaly,
+  author  = {Schmidl, Sebastian and Wenig, Phillip and Papenbrock, Thorsten},
+  title   = {Anomaly Detection in Time Series: A Comprehensive Evaluation},
+  journal = {Proceedings of the VLDB Endowment},
+  volume  = {15},
+  number  = {9},
+  pages   = {1779--1797},
+  year    = {2022},
+  doi     = {10.14778/3538598.3538602}
+}
+@inproceedings{deng2021graph,
+  title={Graph neural network-based anomaly detection in multivariate time series},
+  author={Deng, Ailin and Hooi, Bryan},
+  booktitle={Proceedings of the AAAI conference on artificial intelligence},
+  volume={35},
+  number={5},
+  pages={4027--4035},
+  year={2021}
+}
+@article{10.14778/3514061.3514067,
+author = {Tuli, Shreshth and Casale, Giuliano and Jennings, Nicholas R.},
+title = {TranAD: deep transformer networks for anomaly detection in multivariate time series data},
+year = {2022},
+issue_date = {February 2022},
+publisher = {VLDB Endowment},
+volume = {15},
+number = {6},
+issn = {2150-8097},
+url = {https://doi.org/10.14778/3514061.3514067},
+doi = {10.14778/3514061.3514067},
+abstract = {Efficient anomaly detection and diagnosis in multivariate time-series data is of great importance for modern industrial applications. However, building a system that is able to quickly and accurately pinpoint anomalous observations is a challenging problem. This is due to the lack of anomaly labels, high data volatility and the demands of ultra-low inference times in modern applications. Despite the recent developments of deep learning approaches for anomaly detection, only a few of them can address all of these challenges. In this paper, we propose TranAD, a deep transformer network based anomaly detection and diagnosis model which uses attention-based sequence encoders to swiftly perform inference with the knowledge of the broader temporal trends in the data. TranAD uses focus score-based self-conditioning to enable robust multi-modal feature extraction and adversarial training to gain stability. Additionally, model-agnostic meta learning (MAML) allows us to train the model using limited data. Extensive empirical studies on six publicly available datasets demonstrate that TranAD can outperform state-of-the-art baseline methods in detection and diagnosis performance with data and time-efficient training. Specifically, TranAD increases F1 scores by up to 17\%, reducing training times by up to 99\% compared to the baselines.},
+journal = {Proc. VLDB Endow.},
+month = feb,
+pages = {1201--1214},
+numpages = {14}
+}
+@inproceedings{zhang2022tfad,
+  title={TFAD: A decomposition time series anomaly detection architecture with time-frequency analysis},
+  author={Zhang, Chaoli and Zhou, Tian and Wen, Qingsong and Sun, Liang},
+  booktitle={Proceedings of the 31st ACM international conference on information \& knowledge management},
+  pages={2497--2507},
+  year={2022}
+}
+@article{song2023memto,
+  title={Memto: Memory-guided transformer for multivariate time series anomaly detection},
+  author={Song, Junho and Kim, Keonwoo and Oh, Jeonglyul and Cho, Sungzoon},
+  journal={Advances in Neural Information Processing Systems},
+  volume={36},
+  pages={57947--57963},
+  year={2023}
+}
+@inproceedings{wu2024catch,
+  title     = {{CATCH}: Channel-Aware multivariate Time Series Anomaly Detection via Frequency Patching},
+  author    = {Wu, Xingjian and Qiu, Xiangfei and Li, Zhengyu and Wang, Yihang and Hu, Jilin and Guo, Chenjuan and Xiong, Hui and Yang, Bin},
+  booktitle = {ICLR},
+  year      = {2025}
+}
+@article{qiu2025tab,
+  author  = {Qiu, Xiangfei and Li, Zhe and Qiu, Wanghui and Hu, Shiyan and Zhou, Lekui and Wu, Xingjian and Li, Zhengyu and Guo, Chenjuan and Zhou, Aoying and Sheng, Zhenli and Hu, Jilin and Jensen, Christian S. and Yang, Bin},
+  title   = {{TAB}: Unified Benchmarking of Time Series Anomaly Detection Methods},
+  journal = {Proceedings of the VLDB Endowment},
+  volume  = {18},
+  number  = {9},
+  pages   = {2775--2789},
+  year    = {2025},
+  doi     = {10.14778/3746405.3746407}
+}
+@inproceedings{shen2025learn,
+  title={Learn hybrid prototypes for multivariate time series anomaly detection},
+  author={Shen, Ke-Yuan},
+  booktitle={The Thirteenth International Conference on Learning Representations},
+  year={2025}
+}
+@article{wu2022timesnet,
+  title={Timesnet: Temporal 2d-variation modeling for general time series analysis},
+  author={Wu, Haixu and Hu, Tengge and Liu, Yong and Zhou, Hang and Wang, Jianmin and Long, Mingsheng},
+  journal={arXiv preprint arXiv:2210.02186},
+  year={2022}
+}
+@inproceedings{gong2019memorizing,
+  title={Memorizing normality to detect anomaly: Memory-augmented deep autoencoder for unsupervised anomaly detection},
+  author={Gong, Dong and Liu, Lingqiao and Le, Vuong and Saha, Budhaditya and Mansour, Moussa Reda and Venkatesh, Svetha and Hengel, Anton van den},
+  booktitle={Proceedings of the IEEE/CVF international conference on computer vision},
+  pages={1705--1714},
+  year={2019}
+}
+@inproceedings{CrossAD,
+  title     = {{CrossAD}: Time Series Anomaly Detection with Cross-scale Associations and Cross-window Modeling},
+  author    = {Li, Beibu and Shentu, Qichao and Shu, Yang and Zhang, Hui and Li, Ming and Jin, Ning and Yang, Bin and Guo, Chenjuan},
+  booktitle = {NeurIPS},
+  year      = {2025}
+}
+@inproceedings{DADA,
+title      = {Towards a General Time Series Anomaly Detector with Adaptive Bottlenecks and Dual Adversarial Decoders},
+author     = {Shentu, Qichao and Li, Beibu and Zhao, Kai and Shu, Yang and Rao, Zhongwen and Pan, Lujia and Yang, Bin and Guo, Chenjuan},
+booktitle  = {ICLR},
+year       = {2025}
+}
+@article{scholkopf1999support,
+  title={Support vector method for novelty detection},
+  author={Sch{\"o}lkopf, Bernhard and Williamson, Robert C and Smola, Alex and Shawe-Taylor, John and Platt, John},
+  journal={Advances in neural information processing systems},
+  volume={12},
+  year={1999}
+}
+@article{shyu2003novel,
+  title={A novel anomaly detection scheme based on principal component classifier},
+  author={Shyu, Mei-Ling and Chen, Shu-Ching and Sarinnapakorn, Kanoksri and Chang, LiWu},
+  year={2003}
+}
+@inproceedings{liu2008isolation,
+  title={Isolation forest},
+  author={Liu, Fei Tony and Ting, Kai Ming and Zhou, Zhi-Hua},
+  booktitle={2008 eighth ieee international conference on data mining},
+  pages={413--422},
+  year={2008},
+  organization={IEEE}
+}
+@article{goldstein2012histogram,
+  title={Histogram-based outlier score (hbos): A fast unsupervised anomaly detection algorithm},
+  author={Goldstein, Markus and Dengel, Andreas},
+  journal={KI-2012: poster and demo track},
+  volume={1},
+  pages={59--63},
+  year={2012},
+  publisher={Saarbruecken, Germany}
+}
+@article{xu2021anomaly,
+  title={Anomaly transformer: Time series anomaly detection with association discrepancy},
+  author={Xu, Jiehui and Wu, Haixu and Wang, Jianmin and Long, Mingsheng},
+  journal={arXiv preprint arXiv:2110.02642},
+  year={2021}
+}
+@article{nie2022time,
+  title={A time series is worth 64 words: Long-term forecasting with transformers},
+  author={Nie, Yuqi and Nguyen, Nam H and Sinthong, Phanwadee and Kalagnanam, Jayant},
+  journal={arXiv preprint arXiv:2211.14730},
+  year={2022}
+}
+@article{liu2023itransformer,
+  title={itransformer: Inverted transformers are effective for time series forecasting},
+  author={Liu, Yong and Hu, Tengge and Zhang, Haoran and Wu, Haixu and Wang, Shiyu and Ma, Lintao and Long, Mingsheng},
+  journal={arXiv preprint arXiv:2310.06625},
+  year={2023}
+}
+@inproceedings{sakurada2014anomaly,
+  title={Anomaly detection using autoencoders with nonlinear dimensionality reduction},
+  author={Sakurada, Mayu and Yairi, Takehisa},
+  booktitle={Proceedings of the MLSDA 2014 2nd workshop on machine learning for sensory data analysis},
+  pages={4--11},
+  year={2014}
+}
+@inproceedings{luo2024moderntcn,
+  title={ModernTCN: A Modern Pure Convolution Structure for General Time Series Analysis.},
+  author={Luo, Donghao and Wang, Xue},
+  booktitle={ICLR},
+  year={2024}
+}
+@inproceedings{nam2024breaking,
+  title={Breaking the time-frequency granularity discrepancy in time-series anomaly detection},
+  author={Nam, Youngeun and Yoon, Susik and Shin, Yooju and Bae, Minyoung and Song, Hwanjun and Lee, Jae-Gil and Lee, Byung Suk},
+  booktitle={Proceedings of the ACM Web Conference 2024},
+  pages={4204--4215},
+  year={2024}
+}
+#数据集
+#TEP
+@ARTICLE{10342662,
+  author={Liu, Zeyi and Li, Chen and He, Xiao},
+  journal={IEEE Transactions on Industrial Informatics}, 
+  title={Evidential Ensemble Preference-Guided Learning Approach for Real-Time Multimode Fault Diagnosis}, 
+  year={2024},
+  volume={20},
+  number={4},
+  pages={5495--5504},
+  keywords={Fault diagnosis;Real-time systems;Monitoring;Learning systems;Production;Informatics;Dynamical systems;Broad learning system (BLS);concept drift;evidential reasoning (ER);real-time multimode fault diagnosis (MMFD);Tennessee Eastman process},
+  doi={10.1109/TII.2023.3332112}}
+
+#SMD
+@inproceedings{su2019robust,
+  title={Robust anomaly detection for multivariate time series through stochastic recurrent neural network},
+  author={Su, Ya and Zhao, Youjian and Niu, Chenhao and Liu, Rong and Sun, Wei and Pei, Dan},
+  booktitle={Proceedings of the 25th ACM SIGKDD international conference on knowledge discovery \& data mining},
+  pages={2828--2837},
+  year={2019}
+}
+#MSL SMAP数据集
+@inproceedings{hundman2018detecting,
+  title={Detecting spacecraft anomalies using lstms and nonparametric dynamic thresholding},
+  author={Hundman, Kyle and Constantinou, Valentino and Laporte, Christopher and Colwell, Ian and Soderstrom, Tom},
+  booktitle={Proceedings of the 24th ACM SIGKDD international conference on knowledge discovery \& data mining},
+  pages={387--395},
+  year={2018}
+}
+#SWAT
+@inproceedings{goh2016dataset,
+  title={A dataset to support research in the design of secure water treatment systems},
+  author={Goh, Jonathan and Adepu, Sridhar and Junejo, Khurum Nazir and Mathur, Aditya},
+  booktitle={International conference on critical information infrastructures security},
+  pages={88--99},
+  year={2016},
+  organization={Springer}
+}
+#PSM
+@inproceedings{abdulaal2021practical,
+  title={Practical approach to asynchronous multivariate time series anomaly detection and localization},
+  author={Abdulaal, Ahmed and Liu, Zhuanghua and Lancewicki, Tomer},
+  booktitle={Proceedings of the 27th ACM SIGKDD conference on knowledge discovery \& data mining},
+  pages={2485--2494},
+  year={2021}
+}
+#synthetic
+@inproceedings{lai2021revisiting,
+  title={Revisiting time series outlier detection: Definitions and benchmarks},
+  author={Lai, Kwei-Herng and Zha, Daochen and Xu, Junjie and Zhao, Yue and Wang, Guanchu and Hu, Xia},
+  booktitle={Thirty-fifth conference on neural information processing systems datasets and benchmarks track (round 1)},
+  year={2021}
+}
+######
+@inproceedings{zhou2025unsupervised,
+  title={Unsupervised Dual-Domain Memory Model for Time Series Anomaly Detection},
+  author={Zhou, Mingle and Wang, Xingli and Li, Jiachen and Han, Delong and Li, Gang},
+  booktitle={Proceedings of the 33rd ACM International Conference on Multimedia},
+  pages={5538--5546},
+  year={2025}
+}
+@inproceedings{vilhes2025patchtrad,
+  title={PatchTrAD: A Patch-Based Transformer focusing on Patch-Wise Reconstruction Error for Time Series Anomaly Detection},
+  author={Vilhes, Samy-Melwan and Gasso, Gilles and Alaya, Mokhtar Z},
+  booktitle={2025 33rd European Signal Processing Conference (EUSIPCO)},
+  pages={1104--1108},
+  year={2025},
+  organization={IEEE}
+}
+@inproceedings{
+jeong2026pgrfnet,
+title={{PGRF}-Net: A Prototype-Guided Relational Fusion Network for Diagnostic Multivariate Time-Series Anomaly Detection},
+author={Jahoon Jeong and Hyunsoo Yoon},
+booktitle={The Fourteenth International Conference on Learning Representations},
+year={2026},
+url={https://openreview.net/forum?id=3hS7EtL4bV}
+}
+@inproceedings{li2023prototype,
+  title={Prototype-oriented unsupervised anomaly detection for multivariate time series},
+  author={Li, Yuxin and Chen, Wenchao and Chen, Bo and Wang, Dongsheng and Tian, Long and Zhou, Mingyuan},
+  booktitle={International Conference on Machine Learning},
+  pages={19407--19424},
+  year={2023},
+  organization={PMLR}
+}
+@article{aamodt1994case,
+  title={Case-based reasoning: Foundational issues, methodological variations, and system approaches},
+  author={Aamodt, Agnar and Plaza, Enric},
+  journal={AI communications},
+  volume={7},
+  number={1},
+  pages={39--59},
+  year={1994},
+  publisher={SAGE Publications Sage UK: London, England}
+}
+@inproceedings{roth2022towards,
+  title={Towards total recall in industrial anomaly detection},
+  author={Roth, Karsten and Pemula, Latha and Zepeda, Joaquin and Sch{\"o}lkopf, Bernhard and Brox, Thomas and Gehler, Peter},
+  booktitle={Proceedings of the IEEE/CVF conference on computer vision and pattern recognition},
+  pages={14318--14328},
+  year={2022}
+}
+@inproceedings{sarlin2019coarse,
+  title={From coarse to fine: Robust hierarchical localization at large scale},
+  author={Sarlin, Paul-Edouard and Cadena, Cesar and Siegwart, Roland and Dymczyk, Marcin},
+  booktitle={Proceedings of the IEEE/CVF conference on computer vision and pattern recognition},
+  pages={12716--12725},
+  year={2019}
+}
+@inproceedings{ramaswamy2000efficient,
+  title={Efficient algorithms for mining outliers from large data sets},
+  author={Ramaswamy, Sridhar and Rastogi, Rajeev and Shim, Kyuseok},
+  booktitle={Proceedings of the 2000 ACM SIGMOD international conference on Management of data},
+  pages={427--438},
+  year={2000}
+}
+@inproceedings{park2026paano,
+  title={PaAno: Patch-based Representation Learning for Time-Series Anomaly Detection},
+  author={Park, Jinju and Kang, Seokho},
+  booktitle={Proceedings of International Conference on Learning Representations},
+  year={2026}
+}
+@inproceedings{imamura2025generalized,
+  title={Generalized Discords for Time Series Anomaly Detection with Flexible Subsequence Lengths},
+  author={Imamura, Makoto},
+  booktitle={Proceedings of the 31st ACM SIGKDD Conference on Knowledge Discovery and Data Mining V. 2},
+  pages={1013--1024},
+  year={2025}
+}
+@inproceedings{breunig2000lof,
+  title={LOF: identifying density-based local outliers},
+  author={Breunig, Markus M and Kriegel, Hans-Peter and Ng, Raymond T and Sander, J{\"o}rg},
+  booktitle={Proceedings of the 2000 ACM SIGMOD international conference on Management of data},
+  pages={93--104},
+  year={2000}
+}
+@article{wu2021autoformer,
+  title={Autoformer: Decomposition transformers with auto-correlation for long-term series forecasting},
+  author={Wu, Haixu and Xu, Jiehui and Wang, Jianmin and Long, Mingsheng},
+  journal={Advances in neural information processing systems},
+  volume={34},
+  pages={22419--22430},
+  year={2021}
+}
+@inproceedings{lu2022matrix,
+  title={Matrix profile XXIV: scaling time series anomaly detection to trillions of datapoints and ultra-fast arriving data streams},
+  author={Lu, Yue and Wu, Renjie and Mueen, Abdullah and Zuluaga, Maria A and Keogh, Eamonn},
+  booktitle={Proceedings of the 28th ACM SIGKDD conference on knowledge discovery and data mining},
+  pages={1173--1182},
+  year={2022}
+}
+@article{cai2026raid,
+  title={RAID: Retrieval-Augmented Anomaly Detection},
+  author={Cai, Mingxiu and Zhang, Zhe and Wu, Gaochang and Chai, Tianyou and Zhu, Xiatian},
+  journal={arXiv preprint arXiv:2602.19611},
+  year={2026}
+}
