@@ -1,0 +1,8 @@
+{
+  "SCAR": "/opt/conda/envs/scar-paano-cu126/bin/python",
+  "PaAno": "/opt/conda/envs/scar-paano-cu126/bin/python",
+  "MEMTO": "/opt/conda/envs/memto-cu126/bin/python",
+  "PUAD": "/opt/conda/envs/puad-cu126/bin/python",
+  "PGRF-Net": "/opt/conda/envs/pgrf-cu126/bin/python",
+  "CATCH": "/opt/conda/envs/catch-cu126/bin/python"
+}

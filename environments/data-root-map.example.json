@@ -1,0 +1,6 @@
+{
+  "anomaly_detect": "/data/scar/anomaly_detect",
+  "TSB-AD-M": "/data/scar/TSB-AD-M",
+  "TSB-AD-U": "/data/scar/TSB-AD-U",
+  "TEP": "/data/scar/MMFDD-TEP"
+}

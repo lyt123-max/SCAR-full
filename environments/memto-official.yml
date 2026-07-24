@@ -1,0 +1,20 @@
+name: memto-official
+channels:
+  - pytorch
+  - conda-forge
+dependencies:
+  - python=3.8
+  - pytorch=1.10.1
+  - torchvision=0.11.2
+  - torchaudio=0.10.1
+  - cudatoolkit=11.3
+  - numpy
+  - pandas=1.1.5
+  - scipy=1.5.4
+  - scikit-learn=0.24.2
+  - tqdm=4.64.1
+  - psutil
+  - pip
+  - pip:
+      - kmeans-pytorch==0.3
+      - pynvml

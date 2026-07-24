@@ -1,0 +1,22 @@
+name: scar-paano-cu126
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pytorch=2.7.1
+  - torchvision
+  - torchaudio
+  - pytorch-cuda=12.6
+  - numpy=2.3.2
+  - pandas=2.3.1
+  - scipy=1.16.1
+  - scikit-learn=1.7.1
+  - matplotlib=3.10.5
+  - psutil
+  - pip
+  - pip:
+      - pynvml
+      - tqdm==4.66.5
+      - faiss-cpu

@@ -8,7 +8,12 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 
-from tep_common import empirical_percentile, load_sequence_scores_with_meta, load_window_logs
+from tep_common import (
+    empirical_percentile,
+    load_fault_log_fields,
+    load_sequence_scores_with_meta,
+    load_window_logs,
+)
 
 try:
     from sklearn.manifold import TSNE
@@ -29,8 +34,11 @@ except Exception:
 
 MODE_COLORS = {
     1: "#1f77b4",
+    2: "#ff7f0e",
     3: "#2ca02c",
     4: "#d62728",
+    5: "#9467bd",
+    6: "#17becf",
 }
 
 EVIDENCE_KEYS = ["memory_distance", "state_novelty", "completion_scale8", "completion_scale32"]
@@ -40,6 +48,17 @@ EVIDENCE_LABELS = {
     "completion_scale8": "Comp-short",
     "completion_scale32": "Comp-long",
 }
+
+
+def _available_modes(
+    exp_payloads: list[tuple[str, dict[str, Any]]],
+    log_key: str = "audit_logs",
+) -> list[int]:
+    modes: set[int] = set()
+    for _, payload in exp_payloads:
+        logs = payload[log_key]
+        modes.update(int(value) for value in np.unique(np.asarray(logs["mode_id"])).tolist())
+    return sorted(modes)
 
 
 def parse_args() -> argparse.Namespace:
@@ -73,6 +92,15 @@ def _load_experiment_payload(exp_dir: Path, log_subdir: str) -> dict[str, Any]:
     return {
         "audit_logs": load_window_logs(log_dir, prefix="audit_normal_window_logs"),
         "fault_logs": load_window_logs(log_dir, prefix="fault_window_logs"),
+        "fault_metric_logs": load_fault_log_fields(
+            log_dir,
+            fields=(
+                "mode_id",
+                "fault_id",
+                "memory_distance",
+                "topk_neighbor_mode_ids",
+            ),
+        ),
         "fault_sequence_records": load_sequence_scores_with_meta(log_dir, filename="fault_sequence_scores_with_meta.json"),
     }
 
@@ -133,7 +161,7 @@ def plot_state_embedding(exp_payloads: list[tuple[str, dict[str, Any]]], output_
 
 def plot_normal_violin(exp_payloads: list[tuple[str, dict[str, Any]]], output_dir: Path) -> None:
     fig, axes = plt.subplots(1, len(exp_payloads), figsize=(5 * len(exp_payloads), 5), squeeze=False)
-    mode_order = [1, 3, 4]
+    mode_order = _available_modes(exp_payloads, "audit_logs")
     for col_idx, (label, payload) in enumerate(exp_payloads):
         ax = axes[0, col_idx]
         logs = payload["audit_logs"]
@@ -166,11 +194,11 @@ def plot_normal_violin(exp_payloads: list[tuple[str, dict[str, Any]]], output_di
 
 
 def plot_retrieval_confusion(exp_payloads: list[tuple[str, dict[str, Any]]], output_dir: Path, smr_k: int) -> None:
-    mode_order = [1, 3, 4]
+    mode_order = _available_modes(exp_payloads, "fault_logs")
     fig, axes = plt.subplots(1, len(exp_payloads), figsize=(5 * len(exp_payloads), 4.5), squeeze=False)
     for col_idx, (label, payload) in enumerate(exp_payloads):
         ax = axes[0, col_idx]
-        logs = payload["fault_logs"]
+        logs = payload.get("fault_metric_logs", payload["fault_logs"])
         query_mode = np.asarray(logs["mode_id"], dtype=np.int32)
         neighbor_mode = np.asarray(logs["topk_neighbor_mode_ids"], dtype=np.int32)[:, :smr_k]
         heat = np.zeros((len(mode_order), len(mode_order)), dtype=np.float64)
@@ -233,36 +261,116 @@ def plot_exceedance(exp_payloads: list[tuple[str, dict[str, Any]]], output_dir: 
     print(f"[TEP Plot] wrote {path}")
 
 
+def plot_mode_fpr_and_fault_gap(
+    exp_payloads: list[tuple[str, dict[str, Any]]],
+    output_dir: Path,
+) -> None:
+    mode_order = _available_modes(exp_payloads, "audit_logs")
+    fig, axes = plt.subplots(
+        len(exp_payloads),
+        2,
+        figsize=(10, 3.8 * len(exp_payloads)),
+        squeeze=False,
+    )
+    for row_idx, (label, payload) in enumerate(exp_payloads):
+        audit_logs = payload["audit_logs"]
+        fault_logs = payload.get("fault_metric_logs", payload["fault_logs"])
+        audit_mode = np.asarray(audit_logs["mode_id"], dtype=np.int32)
+        audit_final = np.asarray(audit_logs["final"], dtype=np.float64)
+        audit_memory = np.asarray(audit_logs["memory_distance"], dtype=np.float64)
+        fault_mode = np.asarray(fault_logs["mode_id"], dtype=np.int32)
+        fault_memory = np.asarray(fault_logs["memory_distance"], dtype=np.float64)
+
+        threshold = float(np.quantile(audit_final, 0.95))
+        fpr_values = [
+            float(np.mean(audit_final[audit_mode == mode] > threshold))
+            if np.any(audit_mode == mode)
+            else float("nan")
+            for mode in mode_order
+        ]
+        gap_values = [
+            (
+                float(np.mean(fault_memory[fault_mode == mode]))
+                - float(np.mean(audit_memory[audit_mode == mode]))
+            )
+            if np.any(fault_mode == mode) and np.any(audit_mode == mode)
+            else float("nan")
+            for mode in mode_order
+        ]
+        colors = [MODE_COLORS.get(mode, "#888888") for mode in mode_order]
+        x = np.arange(len(mode_order))
+
+        ax_fpr, ax_gap = axes[row_idx]
+        ax_fpr.bar(x, fpr_values, color=colors, alpha=0.82)
+        ax_fpr.axhline(0.05, color="black", linestyle="--", linewidth=1.2, label="target 0.05")
+        ax_fpr.set_xticks(x, [f"M{mode}" for mode in mode_order])
+        ax_fpr.set_ylabel("normal false-positive rate")
+        ax_fpr.set_title(f"{label}: per-mode normal FPR")
+        ax_fpr.legend()
+        ax_fpr.grid(axis="y", alpha=0.25, linestyle=":")
+
+        ax_gap.bar(x, gap_values, color=colors, alpha=0.82)
+        ax_gap.axhline(0.0, color="black", linewidth=1.0)
+        ax_gap.set_xticks(x, [f"M{mode}" for mode in mode_order])
+        ax_gap.set_ylabel("mean fault memory distance - normal")
+        ax_gap.set_title(f"{label}: fault-normal gap")
+        ax_gap.grid(axis="y", alpha=0.25, linestyle=":")
+
+    fig.tight_layout()
+    path = output_dir / "mode_fpr_and_fault_normal_gap.png"
+    fig.savefig(path, dpi=220, bbox_inches="tight")
+    plt.close(fig)
+    print(f"[TEP Plot] wrote {path}")
+
+
 def plot_fault_evidence_heatmap(exp_payloads: list[tuple[str, dict[str, Any]]], output_dir: Path) -> None:
-    fig, axes = plt.subplots(1, len(exp_payloads), figsize=(6 * len(exp_payloads), 8), squeeze=False)
-    im = None
-    for col_idx, (label, payload) in enumerate(exp_payloads):
-        ax = axes[0, col_idx]
+    mode_order = _available_modes(exp_payloads, "fault_logs")
+    fig, axes = plt.subplots(
+        len(exp_payloads),
+        len(EVIDENCE_KEYS),
+        figsize=(3.3 * len(EVIDENCE_KEYS), 0.28 * 28 * len(exp_payloads) + 2.5),
+        squeeze=False,
+    )
+    images = []
+    for row_idx, (label, payload) in enumerate(exp_payloads):
         rows = _calibrate_fault_sequence_rows(payload["audit_logs"], payload["fault_sequence_records"])
         if not rows:
-            ax.set_title(f"{label}\n(no fault sequences)")
-            ax.axis("off")
+            for ax in axes[row_idx]:
+                ax.set_title(f"{label}\n(no fault sequences)")
+                ax.axis("off")
             continue
-        ordered = sorted(rows, key=lambda row: (int(row["mode_id"]), int(row["fault_id"])))
-        heat = np.asarray(
-            [
-                [float(row.get(f"{key}_calibrated", float("nan"))) for key in EVIDENCE_KEYS]
-                for row in ordered
-            ],
-            dtype=np.float64,
+        fault_order = sorted({int(row["fault_id"]) for row in rows})
+        row_lookup = {
+            (int(row["fault_id"]), int(row["mode_id"])): row
+            for row in rows
+        }
+        for col_idx, evidence_key in enumerate(EVIDENCE_KEYS):
+            ax = axes[row_idx, col_idx]
+            heat = np.full((len(fault_order), len(mode_order)), np.nan, dtype=np.float64)
+            for fault_idx, fault_id in enumerate(fault_order):
+                for mode_idx, mode_id in enumerate(mode_order):
+                    record = row_lookup.get((fault_id, mode_id))
+                    if record is not None:
+                        heat[fault_idx, mode_idx] = float(
+                            record.get(f"{evidence_key}_calibrated", float("nan"))
+                        )
+            image = ax.imshow(heat, cmap="YlGnBu", aspect="auto", vmin=0.0, vmax=1.0)
+            images.append(image)
+            ax.set_xticks(np.arange(len(mode_order)), [f"M{mode}" for mode in mode_order])
+            ax.set_yticks(
+                np.arange(len(fault_order)),
+                [f"IDV{fault}" for fault in fault_order],
+            )
+            ax.set_title(f"{label}: {EVIDENCE_LABELS[evidence_key]}")
+            if col_idx > 0:
+                ax.tick_params(axis="y", labelleft=False)
+    if images:
+        fig.colorbar(
+            images[-1],
+            ax=axes.ravel().tolist(),
+            shrink=0.85,
+            label="calibrated sequence evidence",
         )
-        row_labels = [f"m{int(row['mode_id'])}-d{int(row['fault_id']):02d}" for row in ordered]
-        im = ax.imshow(heat, cmap="YlGnBu", aspect="auto", vmin=0.0, vmax=1.0)
-        ax.set_xticks(np.arange(len(EVIDENCE_KEYS)), [EVIDENCE_LABELS[key] for key in EVIDENCE_KEYS], rotation=25, ha="right")
-        ax.set_yticks(np.arange(len(row_labels)), row_labels)
-        ax.set_title(label)
-        for i in range(heat.shape[0]):
-            for j in range(heat.shape[1]):
-                value = heat[i, j]
-                if np.isfinite(value):
-                    ax.text(j, i, f"{value:.2f}", ha="center", va="center", fontsize=8, color="black")
-    if im is not None:
-        fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.85, label="calibrated sequence evidence")
     fig.tight_layout()
     path = output_dir / "fault_evidence_heatmap.png"
     fig.savefig(path, dpi=220, bbox_inches="tight")
@@ -271,7 +379,7 @@ def plot_fault_evidence_heatmap(exp_payloads: list[tuple[str, dict[str, Any]]], 
 
 
 def plot_fault_triplet_consistency(exp_payloads: list[tuple[str, dict[str, Any]]], output_dir: Path) -> None:
-    mode_order = [1, 3, 4]
+    mode_order = _available_modes(exp_payloads, "fault_logs")
     fig, axes = plt.subplots(1, len(exp_payloads), figsize=(6 * len(exp_payloads), 4.5), squeeze=False)
     max_fault_count = 0
     for col_idx, (label, payload) in enumerate(exp_payloads):
@@ -296,7 +404,7 @@ def plot_fault_triplet_consistency(exp_payloads: list[tuple[str, dict[str, Any]]
                     x_values.append(mode_id)
                     points.append(float(np.mean(matched)))
             if len(points) >= 2:
-                ax.plot(x_values, points, marker="o", linewidth=1.2, alpha=0.75, label=f"d{fault_id:02d}")
+                ax.plot(x_values, points, marker="o", linewidth=1.2, alpha=0.75, label=f"IDV{fault_id}")
             elif len(points) == 1:
                 ax.scatter(x_values, points, s=30, alpha=0.75)
         ax.set_xticks(mode_order, [f"mode {mode}" for mode in mode_order])
@@ -354,7 +462,7 @@ def plot_a4_gain_heatmap(
         plt.close(fig)
         print(f"[TEP Plot] wrote {path}")
         return
-    modes = [1, 3, 4]
+    modes = sorted({int(multi_table[name]["mode_id"]) for name in common})
     faults = sorted({multi_table[name]["fault_id"] for name in common})
     heat = np.full((len(modes), len(faults)), np.nan, dtype=np.float64)
     for name in common:
@@ -368,7 +476,7 @@ def plot_a4_gain_heatmap(
 
     fig, ax = plt.subplots(figsize=(1.2 * len(faults) + 2.5, 4.2))
     im = ax.imshow(heat, cmap="coolwarm", aspect="auto")
-    ax.set_xticks(np.arange(len(faults)), [f"d{fault:02d}" for fault in faults], rotation=45, ha="right")
+    ax.set_xticks(np.arange(len(faults)), [f"IDV{fault}" for fault in faults], rotation=45, ha="right")
     ax.set_yticks(np.arange(len(modes)), [f"mode {mode}" for mode in modes])
     ax.set_title("Fault-File Gain Heatmap")
     for i in range(len(modes)):
@@ -415,6 +523,7 @@ def main() -> None:
         plot_normal_violin(exp_payloads, output_dir)
         plot_retrieval_confusion(exp_payloads, output_dir, args.smr_k)
         plot_exceedance(exp_payloads, output_dir)
+        plot_mode_fpr_and_fault_gap(exp_payloads, output_dir)
         plot_fault_evidence_heatmap(exp_payloads, output_dir)
         plot_fault_triplet_consistency(exp_payloads, output_dir)
 

@@ -4,7 +4,7 @@ import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 import torch
@@ -27,9 +27,22 @@ class ScaleMemory:
     z: torch.Tensor
     c: torch.Tensor
     window_ids: torch.Tensor
+    raw_starts: Optional[torch.Tensor] = None
     coverage_threshold: float = float("inf")
 
     def __post_init__(self) -> None:
+        if self.raw_starts is None:
+            self.raw_starts = torch.full(
+                (self.window_ids.numel(),),
+                -1,
+                dtype=torch.long,
+            )
+        self.raw_starts = self.raw_starts.long().cpu().contiguous()
+        if self.raw_starts.numel() != self.window_ids.numel():
+            raise ValueError(
+                "ScaleMemory raw_starts must align with window_ids: "
+                f"raw_starts={self.raw_starts.numel()} window_ids={self.window_ids.numel()}"
+            )
         self._lookup = self._build_lookup()
 
     def _build_lookup(self) -> dict[int, tuple[int, int]]:
@@ -75,6 +88,7 @@ class _ScaleDiskCache:
     z_mm: Optional[np.memmap]
     c_mm: Optional[np.memmap]
     window_ids_mm: Optional[np.memmap]
+    raw_starts_mm: Optional[np.memmap]
     comp_mm: Optional[np.memmap]
     cursor: int = 0
 
@@ -83,9 +97,15 @@ class _ScaleDiskCache:
         z: torch.Tensor,
         c: torch.Tensor,
         window_ids: torch.Tensor,
+        raw_starts: torch.Tensor,
         comp: Optional[torch.Tensor],
     ) -> None:
-        if self.z_mm is None or self.c_mm is None or self.window_ids_mm is None:
+        if (
+            self.z_mm is None
+            or self.c_mm is None
+            or self.window_ids_mm is None
+            or self.raw_starts_mm is None
+        ):
             raise RuntimeError("Scale disk cache has already been closed.")
         rows = int(z.size(0))
         start = self.cursor
@@ -98,6 +118,7 @@ class _ScaleDiskCache:
         self.z_mm[start:end] = z.numpy()
         self.c_mm[start:end] = c.numpy()
         self.window_ids_mm[start:end] = window_ids.numpy()
+        self.raw_starts_mm[start:end] = raw_starts.numpy()
         if self.comp_mm is not None:
             if comp is None:
                 raise RuntimeError("Missing completion scores for a completion-enabled scale cache.")
@@ -116,11 +137,13 @@ class _ScaleDiskCache:
             self.c_mm.flush()
         if self.window_ids_mm is not None:
             self.window_ids_mm.flush()
+        if self.raw_starts_mm is not None:
+            self.raw_starts_mm.flush()
         if self.comp_mm is not None:
             self.comp_mm.flush()
 
     def close(self) -> None:
-        for name in ("z_mm", "c_mm", "window_ids_mm", "comp_mm"):
+        for name in ("z_mm", "c_mm", "window_ids_mm", "raw_starts_mm", "comp_mm"):
             arr = getattr(self, name)
             if arr is None:
                 continue
@@ -141,6 +164,7 @@ class MemoryBank:
         prototype_centers: Optional[torch.Tensor] = None,
         prototype_labels: Optional[torch.Tensor] = None,
         prototype_members: Optional[list[torch.Tensor]] = None,
+        build_stats: Optional[list[dict[str, Any]]] = None,
         build_index: bool = True,
     ):
         self.config = config
@@ -149,6 +173,7 @@ class MemoryBank:
         if state_window_starts is None:
             state_window_starts = torch.arange(self.state_bank.size(0), dtype=torch.long)
         self.state_window_starts = state_window_starts.long().cpu().contiguous()
+        self.build_stats = list(build_stats or [])
         if self.config.use_prototype_support:
             if prototype_centers is None or prototype_labels is None or prototype_members is None:
                 prototype_centers, prototype_labels, prototype_members = self._build_state_prototypes(
@@ -278,7 +303,7 @@ class MemoryBank:
             batch_size = min(max(256, n_clusters * 16), max(256, num_windows))
             kmeans = MiniBatchKMeans(
                 n_clusters=n_clusters,
-                random_state=config.seed,
+                random_state=config.effective_memory_seed,
                 batch_size=batch_size,
                 n_init=10,
                 reassignment_ratio=0.0,
@@ -291,7 +316,7 @@ class MemoryBank:
             centers, labels = cls._torch_kmeans(
                 state_bank=state_bank,
                 n_clusters=n_clusters,
-                seed=config.seed,
+                seed=config.effective_memory_seed,
             )
             labels_np = labels.numpy()
             backend = "torch-kmeans"
@@ -322,6 +347,7 @@ class MemoryBank:
         z_mm = np.memmap(temp_dir / f"{prefix}_z.dat", mode="w+", dtype=np.float32, shape=(raw_count, d_z))
         c_mm = np.memmap(temp_dir / f"{prefix}_c.dat", mode="w+", dtype=np.float32, shape=(raw_count, d_z))
         window_ids_mm = np.memmap(temp_dir / f"{prefix}_window_ids.dat", mode="w+", dtype=np.int64, shape=(raw_count,))
+        raw_starts_mm = np.memmap(temp_dir / f"{prefix}_raw_starts.dat", mode="w+", dtype=np.int64, shape=(raw_count,))
         comp_mm = None
         if with_completion_scores:
             comp_mm = np.memmap(temp_dir / f"{prefix}_comp.dat", mode="w+", dtype=np.float32, shape=(raw_count,))
@@ -331,6 +357,7 @@ class MemoryBank:
             z_mm=z_mm,
             c_mm=c_mm,
             window_ids_mm=window_ids_mm,
+            raw_starts_mm=raw_starts_mm,
             comp_mm=comp_mm,
         )
 
@@ -424,7 +451,12 @@ class MemoryBank:
         scale_cache: _ScaleDiskCache,
         config: CoReMADConfig,
     ) -> tuple[ScaleMemory, int, int, int, float, str]:
-        if scale_cache.z_mm is None or scale_cache.c_mm is None or scale_cache.window_ids_mm is None:
+        if (
+            scale_cache.z_mm is None
+            or scale_cache.c_mm is None
+            or scale_cache.window_ids_mm is None
+            or scale_cache.raw_starts_mm is None
+        ):
             raise RuntimeError("Scale disk cache is not available for materialization.")
         raw_count = int(scale_cache.raw_count)
         clean_mask: Optional[np.ndarray] = None
@@ -456,7 +488,11 @@ class MemoryBank:
                 if cleaned_raw_indices is not None
                 else np.asarray(scale_cache.window_ids_mm)
             )
-            selected_clean_indices = cls._stratified_random_sampling_np(clean_window_ids, keep, config.seed)
+            selected_clean_indices = cls._stratified_random_sampling_np(
+                clean_window_ids,
+                keep,
+                config.effective_memory_seed,
+            )
             raw_keep_indices = (
                 cleaned_raw_indices[selected_clean_indices]
                 if cleaned_raw_indices is not None
@@ -468,33 +504,41 @@ class MemoryBank:
                 if cleaned_raw_indices is not None
                 else np.arange(raw_count, dtype=np.int64)
             )
-            z = torch.from_numpy(np.array(scale_cache.z_mm[base_indices], copy=True)).float()
-            c = torch.from_numpy(np.array(scale_cache.c_mm[base_indices], copy=True)).float()
-            window_ids = torch.from_numpy(np.array(scale_cache.window_ids_mm[base_indices], copy=True)).long()
-            if keep < clean_count:
-                z, c, window_ids = cls._coreset(z, c, window_ids, config)
-            order = torch.argsort(window_ids)
-            z = z[order].float().contiguous()
-            c = c[order].float().contiguous()
-            window_ids = window_ids[order].long().contiguous()
-            scale_memory = ScaleMemory(z=z, c=c, window_ids=window_ids)
-            return (
-                scale_memory,
-                raw_count,
-                clean_count,
-                int(scale_memory.z.size(0)),
-                clean_threshold,
-                coreset_mode,
+            base_c = torch.from_numpy(np.array(scale_cache.c_mm[base_indices], copy=True)).float()
+            base_window_ids = torch.from_numpy(
+                np.array(scale_cache.window_ids_mm[base_indices], copy=True)
+            ).long()
+            selected_clean_indices = cls._select_indices(
+                base_c,
+                base_window_ids,
+                keep,
+                config,
             )
+            raw_keep_indices = base_indices[selected_clean_indices.cpu().numpy()]
+
+        cls._write_scale_audit(
+            scale_cache=scale_cache,
+            clean_mask=clean_mask,
+            raw_keep_indices=np.asarray(raw_keep_indices, dtype=np.int64),
+            clean_threshold=clean_threshold,
+            config=config,
+        )
 
         z = torch.from_numpy(np.array(scale_cache.z_mm[raw_keep_indices], copy=True)).float()
         c = torch.from_numpy(np.array(scale_cache.c_mm[raw_keep_indices], copy=True)).float()
         window_ids = torch.from_numpy(np.array(scale_cache.window_ids_mm[raw_keep_indices], copy=True)).long()
+        raw_starts = torch.from_numpy(np.array(scale_cache.raw_starts_mm[raw_keep_indices], copy=True)).long()
         order = torch.argsort(window_ids)
         z = z[order].float().contiguous()
         c = c[order].float().contiguous()
         window_ids = window_ids[order].long().contiguous()
-        scale_memory = ScaleMemory(z=z, c=c, window_ids=window_ids)
+        raw_starts = raw_starts[order].long().contiguous()
+        scale_memory = ScaleMemory(
+            z=z,
+            c=c,
+            window_ids=window_ids,
+            raw_starts=raw_starts,
+        )
         return (
             scale_memory,
             raw_count,
@@ -502,6 +546,99 @@ class MemoryBank:
             int(scale_memory.z.size(0)),
             clean_threshold,
             coreset_mode,
+        )
+
+    @staticmethod
+    def _write_scale_audit(
+        scale_cache: _ScaleDiskCache,
+        clean_mask: Optional[np.ndarray],
+        raw_keep_indices: np.ndarray,
+        clean_threshold: float,
+        config: CoReMADConfig,
+    ) -> None:
+        if config.memory_audit_mode != "full":
+            return
+        if scale_cache.window_ids_mm is None or scale_cache.raw_starts_mm is None:
+            raise RuntimeError("Cannot write memory audit after scale cache closure.")
+        raw_count = int(scale_cache.raw_count)
+        kept_after_purification = (
+            np.ones(raw_count, dtype=bool)
+            if clean_mask is None
+            else np.asarray(clean_mask, dtype=bool)
+        )
+        kept_after_coreset = np.zeros(raw_count, dtype=bool)
+        kept_after_coreset[np.asarray(raw_keep_indices, dtype=np.int64)] = True
+        completion_score = (
+            np.full(raw_count, np.nan, dtype=np.float32)
+            if scale_cache.comp_mm is None
+            else np.asarray(scale_cache.comp_mm, dtype=np.float32)
+        )
+        config.memory_audit_dir.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(
+            config.memory_audit_dir / f"memory_audit_scale{scale_cache.patch_size}.npz",
+            patch_size=np.asarray(scale_cache.patch_size, dtype=np.int64),
+            raw_start=np.asarray(scale_cache.raw_starts_mm, dtype=np.int64),
+            window_id=np.asarray(scale_cache.window_ids_mm, dtype=np.int64),
+            completion_score=completion_score,
+            kept_after_purification=kept_after_purification,
+            kept_after_coreset=kept_after_coreset,
+            clean_threshold=np.asarray(clean_threshold, dtype=np.float64),
+        )
+
+    @staticmethod
+    def _write_array_audit(
+        patch_size: int,
+        raw_starts: torch.Tensor,
+        window_ids: torch.Tensor,
+        completion_scores: torch.Tensor,
+        clean_mask: torch.Tensor,
+        raw_keep_indices: torch.Tensor,
+        clean_threshold: float,
+        config: CoReMADConfig,
+    ) -> None:
+        if config.memory_audit_mode != "full":
+            return
+        kept_after_coreset = torch.zeros(raw_starts.numel(), dtype=torch.bool)
+        kept_after_coreset[raw_keep_indices.long()] = True
+        config.memory_audit_dir.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(
+            config.memory_audit_dir / f"memory_audit_scale{int(patch_size)}.npz",
+            patch_size=np.asarray(int(patch_size), dtype=np.int64),
+            raw_start=raw_starts.cpu().numpy().astype(np.int64, copy=False),
+            window_id=window_ids.cpu().numpy().astype(np.int64, copy=False),
+            completion_score=completion_scores.cpu().numpy().astype(np.float32, copy=False),
+            kept_after_purification=clean_mask.cpu().numpy().astype(bool, copy=False),
+            kept_after_coreset=kept_after_coreset.cpu().numpy().astype(bool, copy=False),
+            clean_threshold=np.asarray(clean_threshold, dtype=np.float64),
+        )
+
+    def _write_state_audit(self) -> None:
+        if self.config.memory_audit_mode != "full":
+            return
+        n_windows = int(self.state_bank.size(0))
+        if self.prototype_centers.numel() > 0 and self.prototype_labels.numel() == n_windows:
+            prototype_ids = self.prototype_labels.long()
+            assigned_centers = self.prototype_centers[prototype_ids]
+            prototype_distances = torch.linalg.vector_norm(
+                self.state_bank - assigned_centers,
+                dim=1,
+            )
+        else:
+            prototype_ids = torch.full((n_windows,), -1, dtype=torch.long)
+            center = self.state_bank.mean(dim=0, keepdim=True)
+            prototype_distances = torch.linalg.vector_norm(
+                self.state_bank - center,
+                dim=1,
+            )
+        self.config.memory_audit_dir.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(
+            self.config.memory_audit_dir / "memory_audit_state.npz",
+            window_id=np.arange(n_windows, dtype=np.int64),
+            raw_start=self.state_window_starts.cpu().numpy().astype(np.int64, copy=False),
+            prototype_id=prototype_ids.cpu().numpy().astype(np.int64, copy=False),
+            prototype_distance=prototype_distances.cpu().numpy().astype(
+                np.float32, copy=False
+            ),
         )
 
     @classmethod
@@ -526,6 +663,7 @@ class MemoryBank:
         z_chunks = [[] for _ in config.patch_sizes]
         c_chunks = [[] for _ in config.patch_sizes]
         wid_chunks = [[] for _ in config.patch_sizes]
+        raw_start_chunks = [[] for _ in config.patch_sizes]
         need_completion_scores = config.use_completion_head and config.use_completion_self_cleaning
         comp_chunks = [[] for _ in config.patch_sizes] if need_completion_scores else None
         window_offset = 0
@@ -540,15 +678,21 @@ class MemoryBank:
                     comp_scores = []
                 batch_size = x.size(0)
                 state_chunks.append(encoded["state_vec"].detach().cpu())
-                state_start_chunks.append(batch["start"].detach().cpu().long())
+                batch_starts = batch["start"].detach().cpu().long()
+                state_start_chunks.append(batch_starts)
                 for scale_idx in range(len(config.patch_sizes)):
                     z = encoded["z"][scale_idx].detach().cpu().reshape(-1, config.d_z)
                     c = encoded["c"][scale_idx].detach().cpu().reshape(-1, config.d_z)
                     n_patches = encoded["z"][scale_idx].size(1)
                     window_ids = torch.arange(window_offset, window_offset + batch_size).repeat_interleave(n_patches)
+                    patch_size = int(config.patch_sizes[scale_idx])
+                    raw_starts = batch_starts.repeat_interleave(n_patches) + (
+                        torch.arange(n_patches, dtype=torch.long).repeat(batch_size) * patch_size
+                    )
                     z_chunks[scale_idx].append(z)
                     c_chunks[scale_idx].append(c)
                     wid_chunks[scale_idx].append(window_ids)
+                    raw_start_chunks[scale_idx].append(raw_starts)
                     if comp_chunks is not None:
                         comp_chunks[scale_idx].append(comp_scores[scale_idx].detach().cpu().reshape(-1))
                 window_offset += batch_size
@@ -573,32 +717,76 @@ class MemoryBank:
             prototype_members = []
             print("[Memory] State prototypes skipped: use_prototype_support=False")
         scales = []
+        build_stats: list[dict[str, Any]] = []
         for scale_idx in range(len(config.patch_sizes)):
             z = torch.cat(z_chunks[scale_idx], dim=0)
             c = torch.cat(c_chunks[scale_idx], dim=0)
             window_ids = torch.cat(wid_chunks[scale_idx], dim=0)
+            raw_starts = torch.cat(raw_start_chunks[scale_idx], dim=0)
             raw_count = z.size(0)
             patch_size = config.patch_sizes[scale_idx]
             if comp_chunks is not None:
                 comp = torch.cat(comp_chunks[scale_idx], dim=0)
                 clean_threshold = cls._self_clean_threshold(comp, config.clean_ratio)
-                z, c, window_ids = cls._self_clean(z, c, window_ids, comp, config.clean_ratio)
+                clean_mask = comp <= clean_threshold
             else:
                 clean_threshold = float("inf")
-            clean_count = z.size(0)
+                comp = torch.full((raw_count,), float("nan"), dtype=torch.float32)
+                clean_mask = torch.ones(raw_count, dtype=torch.bool)
+            clean_indices = torch.flatnonzero(clean_mask)
+            clean_count = int(clean_indices.numel())
             coreset_mode = cls._coreset_mode(clean_count, config)
-            z, c, window_ids = cls._coreset(z, c, window_ids, config)
-            coreset_count = z.size(0)
+            keep = cls._coreset_keep(clean_count, config)
+            selected_clean_indices = cls._select_indices(
+                c[clean_indices],
+                window_ids[clean_indices],
+                keep,
+                config,
+            )
+            raw_keep_indices = clean_indices[selected_clean_indices]
+            z = z[raw_keep_indices]
+            c = c[raw_keep_indices]
+            window_ids = window_ids[raw_keep_indices]
+            selected_raw_starts = raw_starts[raw_keep_indices]
+            coreset_count = int(z.size(0))
+            cls._write_array_audit(
+                patch_size=patch_size,
+                raw_starts=raw_starts,
+                window_ids=torch.cat(wid_chunks[scale_idx], dim=0),
+                completion_scores=comp,
+                clean_mask=clean_mask,
+                raw_keep_indices=raw_keep_indices,
+                clean_threshold=clean_threshold,
+                config=config,
+            )
             order = torch.argsort(window_ids)
             z = z[order].float().contiguous()
             c = c[order].float().contiguous()
             window_ids = window_ids[order].long().contiguous()
+            selected_raw_starts = selected_raw_starts[order].long().contiguous()
             print(
                 f"[Memory] Scale patch_size={patch_size}: raw_patches={raw_count}, "
                 f"after_clean={clean_count}, after_coreset={coreset_count}, "
                 f"clean_threshold={clean_threshold:.6f}, coreset_mode={coreset_mode}"
             )
-            scales.append(ScaleMemory(z=z, c=c, window_ids=window_ids))
+            build_stats.append(
+                {
+                    "patch_size": int(patch_size),
+                    "raw_count": int(raw_count),
+                    "clean_threshold": float(clean_threshold),
+                    "clean_count": int(clean_count),
+                    "coreset_mode": str(coreset_mode),
+                    "final_count": int(coreset_count),
+                }
+            )
+            scales.append(
+                ScaleMemory(
+                    z=z,
+                    c=c,
+                    window_ids=window_ids,
+                    raw_starts=selected_raw_starts,
+                )
+            )
         memory = cls(
             config=config,
             state_bank=state_bank,
@@ -607,7 +795,9 @@ class MemoryBank:
             prototype_centers=prototype_centers,
             prototype_labels=prototype_labels,
             prototype_members=prototype_members,
+            build_stats=build_stats,
         )
+        memory._write_state_audit()
         print(
             f"[Memory] State index ready: backend={memory.state_index.describe()}, "
             f"n_vectors={memory.state_bank.size(0)}, faiss_use_gpu={config.faiss_use_gpu}"
@@ -665,7 +855,8 @@ class MemoryBank:
                         comp_scores = []
                     batch_size = x.size(0)
                     state_chunks.append(encoded["state_vec"].detach().cpu())
-                    state_start_chunks.append(batch["start"].detach().cpu().long())
+                    batch_starts = batch["start"].detach().cpu().long()
+                    state_start_chunks.append(batch_starts)
                     for scale_idx in range(len(config.patch_sizes)):
                         z = encoded["z"][scale_idx].detach().cpu().reshape(-1, config.d_z).contiguous()
                         c = encoded["c"][scale_idx].detach().cpu().reshape(-1, config.d_z).contiguous()
@@ -675,10 +866,20 @@ class MemoryBank:
                             .repeat_interleave(n_patches)
                             .long()
                         )
+                        patch_size = int(config.patch_sizes[scale_idx])
+                        raw_starts = batch_starts.repeat_interleave(n_patches) + (
+                            torch.arange(n_patches, dtype=torch.long).repeat(batch_size) * patch_size
+                        )
                         comp = None
                         if need_completion_scores:
                             comp = comp_scores[scale_idx].detach().cpu().reshape(-1).contiguous()
-                        scale_caches[scale_idx].append(z=z, c=c, window_ids=window_ids, comp=comp)
+                        scale_caches[scale_idx].append(
+                            z=z,
+                            c=c,
+                            window_ids=window_ids,
+                            raw_starts=raw_starts,
+                            comp=comp,
+                        )
                     window_offset += batch_size
                     if total_batches is not None and (
                         batch_idx == 1
@@ -709,6 +910,7 @@ class MemoryBank:
                 print("[Memory] State prototypes skipped: use_prototype_support=False")
 
             scales = []
+            build_stats: list[dict[str, Any]] = []
             for scale_cache in scale_caches:
                 (
                     scale_memory,
@@ -723,6 +925,16 @@ class MemoryBank:
                     f"after_clean={clean_count}, after_coreset={coreset_count}, "
                     f"clean_threshold={clean_threshold:.6f}, coreset_mode={coreset_mode}"
                 )
+                build_stats.append(
+                    {
+                        "patch_size": int(scale_cache.patch_size),
+                        "raw_count": int(raw_count),
+                        "clean_threshold": float(clean_threshold),
+                        "clean_count": int(clean_count),
+                        "coreset_mode": str(coreset_mode),
+                        "final_count": int(coreset_count),
+                    }
+                )
                 scales.append(scale_memory)
 
             memory = cls(
@@ -733,7 +945,9 @@ class MemoryBank:
                 prototype_centers=prototype_centers,
                 prototype_labels=prototype_labels,
                 prototype_members=prototype_members,
+                build_stats=build_stats,
             )
+            memory._write_state_audit()
             print(
                 f"[Memory] State index ready: backend={memory.state_index.describe()}, "
                 f"n_vectors={memory.state_bank.size(0)}, faiss_use_gpu={config.faiss_use_gpu}"
@@ -846,7 +1060,11 @@ class MemoryBank:
         if keep >= total:
             return torch.arange(total, dtype=torch.long)
         if total > config.coreset_fps_threshold:
-            return MemoryBank._stratified_random_sampling(window_ids, keep, config.seed)
+            return MemoryBank._stratified_random_sampling(
+                window_ids,
+                keep,
+                config.effective_memory_seed,
+            )
         return MemoryBank._approx_farthest_point_sampling(features, keep, config)
 
     @staticmethod
@@ -1106,7 +1324,7 @@ class MemoryBank:
         scale_memory: ScaleMemory,
         candidate_idx_list: list[Optional[torch.Tensor]],
         device: torch.device,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         batch = len(candidate_idx_list)
         d_z = int(scale_memory.z.shape[1])
         lengths = [0 if idx is None else int(idx.numel()) for idx in candidate_idx_list]
@@ -1114,12 +1332,14 @@ class MemoryBank:
         if max_len == 0:
             zeros = torch.zeros(batch, 0, d_z, device=device, dtype=scale_memory.z.dtype)
             window_ids = torch.zeros(batch, 0, device=device, dtype=torch.long)
+            raw_starts = torch.zeros(batch, 0, device=device, dtype=torch.long)
             valid = torch.zeros(batch, 0, device=device, dtype=torch.bool)
-            return zeros, zeros, window_ids, valid
+            return zeros, zeros, window_ids, raw_starts, valid
 
         packed_z = torch.zeros(batch, max_len, d_z, dtype=scale_memory.z.dtype)
         packed_c = torch.zeros(batch, max_len, d_z, dtype=scale_memory.c.dtype)
         packed_window_ids = torch.full((batch, max_len), -1, dtype=torch.long)
+        packed_raw_starts = torch.full((batch, max_len), -1, dtype=torch.long)
         valid = torch.zeros(batch, max_len, dtype=torch.bool)
         for batch_idx, candidate_idx in enumerate(candidate_idx_list):
             if candidate_idx is None or candidate_idx.numel() == 0:
@@ -1129,11 +1349,13 @@ class MemoryBank:
             packed_z[batch_idx, :count] = scale_memory.z[candidate_idx]
             packed_c[batch_idx, :count] = scale_memory.c[candidate_idx]
             packed_window_ids[batch_idx, :count] = scale_memory.window_ids[candidate_idx]
+            packed_raw_starts[batch_idx, :count] = scale_memory.raw_starts[candidate_idx]
             valid[batch_idx, :count] = True
         return (
             packed_z.to(device, non_blocking=True),
             packed_c.to(device, non_blocking=True),
             packed_window_ids.to(device, non_blocking=True),
+            packed_raw_starts.to(device, non_blocking=True),
             valid.to(device, non_blocking=True),
         )
 
@@ -1418,6 +1640,7 @@ class MemoryBank:
         mem_scores: list[torch.Tensor] = []
         soft_mem_scores: list[torch.Tensor] = []
         neighbor_window_ids: list[torch.Tensor] = []
+        neighbor_raw_starts: list[torch.Tensor] = []
         neighbor_context_distances: list[torch.Tensor] = []
         neighbor_valid_masks: list[torch.Tensor] = []
         for scale_idx, scale_memory in enumerate(self.scales):
@@ -1444,6 +1667,12 @@ class MemoryBank:
                     device=z_query.device,
                     dtype=torch.bool,
                 )
+                scale_neighbor_raw_starts = torch.full(
+                    (batch, n_patches, self.config.top_K),
+                    -1,
+                    device=z_query.device,
+                    dtype=torch.long,
+                )
 
             retrieval_query = c_query if self.config.use_context_key_retrieval else z_query
             if self.config.use_two_level_retrieval:
@@ -1451,11 +1680,13 @@ class MemoryBank:
                     scale_memory.candidate_indices(coarse_windows[batch_idx])
                     for batch_idx in range(batch)
                 ]
-                candidate_z, candidate_c, candidate_window_ids, candidate_valid = self._pack_scale_candidates(
-                    scale_memory,
-                    coarse_candidate_idx,
-                    z_query.device,
-                )
+                (
+                    candidate_z,
+                    candidate_c,
+                    candidate_window_ids,
+                    candidate_raw_starts,
+                    candidate_valid,
+                ) = self._pack_scale_candidates(scale_memory, coarse_candidate_idx, z_query.device)
             else:
                 full_z = self._get_cached_tensor(f"scale_{scale_idx}_z", scale_memory.z, z_query.device)
                 full_c = self._get_cached_tensor(f"scale_{scale_idx}_c", scale_memory.c, c_query.device)
@@ -1464,9 +1695,15 @@ class MemoryBank:
                     scale_memory.window_ids,
                     z_query.device,
                 )
+                full_raw_starts = self._get_cached_tensor(
+                    f"scale_{scale_idx}_raw_starts",
+                    scale_memory.raw_starts,
+                    z_query.device,
+                )
                 candidate_z = full_z.unsqueeze(0).expand(batch, -1, -1)
                 candidate_c = full_c.unsqueeze(0).expand(batch, -1, -1)
                 candidate_window_ids = full_window_ids.unsqueeze(0).expand(batch, -1)
+                candidate_raw_starts = full_raw_starts.unsqueeze(0).expand(batch, -1)
                 candidate_valid = torch.ones(
                     batch,
                     candidate_z.shape[1],
@@ -1474,7 +1711,7 @@ class MemoryBank:
                     dtype=torch.bool,
                 )
             candidate_key = candidate_c if self.config.use_context_key_retrieval else candidate_z
-            neighbor_z, ctx_dists, neighbor_valid, window_ids, _ = self._batched_context_topk_neighbors(
+            neighbor_z, ctx_dists, neighbor_valid, window_ids, topk_idx = self._batched_context_topk_neighbors(
                 retrieval_query,
                 candidate_key,
                 candidate_z,
@@ -1482,6 +1719,22 @@ class MemoryBank:
                 candidate_valid,
                 self.config.top_K,
             )
+            if candidate_raw_starts.shape[1] > 0:
+                expanded_raw_starts = candidate_raw_starts[:, None, :].expand(
+                    -1, n_patches, -1
+                )
+                selected_raw_starts = torch.gather(
+                    expanded_raw_starts,
+                    2,
+                    topk_idx,
+                ).masked_fill(~neighbor_valid, -1)
+            else:
+                selected_raw_starts = torch.full(
+                    (batch, n_patches, self.config.top_K),
+                    -1,
+                    device=z_query.device,
+                    dtype=torch.long,
+                )
             mem = self._compute_memory_score(
                 z_query,
                 neighbor_z,
@@ -1493,6 +1746,7 @@ class MemoryBank:
             soft_mem = mem.clone()
             if return_details:
                 scale_neighbor_ids = window_ids
+                scale_neighbor_raw_starts = selected_raw_starts
                 scale_neighbor_dists = ctx_dists
                 scale_neighbor_valid = neighbor_valid
 
@@ -1509,12 +1763,16 @@ class MemoryBank:
                 proto_window_weights_list.append(proto_window_weights)
                 proto_candidate_idx_list.append(scale_memory.candidate_indices(proto_window_ids))
 
-            proto_candidate_z, proto_candidate_c, proto_candidate_window_ids, proto_candidate_valid = (
-                self._pack_scale_candidates(
-                    scale_memory,
-                    proto_candidate_idx_list,
-                    z_query.device,
-                )
+            (
+                proto_candidate_z,
+                proto_candidate_c,
+                proto_candidate_window_ids,
+                _,
+                proto_candidate_valid,
+            ) = self._pack_scale_candidates(
+                scale_memory,
+                proto_candidate_idx_list,
+                z_query.device,
             )
             proto_candidate_weights = self._pack_candidate_weights(
                 scale_memory,
@@ -1555,14 +1813,20 @@ class MemoryBank:
             soft_mem_scores.append(soft_mem)
             if return_details:
                 neighbor_window_ids.append(scale_neighbor_ids)
+                neighbor_raw_starts.append(scale_neighbor_raw_starts)
                 neighbor_context_distances.append(scale_neighbor_dists)
                 neighbor_valid_masks.append(scale_neighbor_valid)
 
+        coarse_window_ids_tensor = torch.from_numpy(coarse_windows).long()
+        coarse_window_starts = self.state_window_starts[
+            coarse_window_ids_tensor.clamp(min=0)
+        ].masked_fill(coarse_window_ids_tensor < 0, -1)
         out = {
             "mem_scores": mem_scores,
             "soft_mem_scores": soft_mem_scores,
             "state_novelty": novelty.to(state_vec.device),
             "coarse_windows": coarse_windows,
+            "coarse_window_starts": coarse_window_starts.to(state_vec.device),
             "coarse_distances": torch.from_numpy(coarse_distances).to(state_vec.device),
             "prototype_ids": prototype_ids,
             "prototype_weights": prototype_weights,
@@ -1570,6 +1834,7 @@ class MemoryBank:
         }
         if return_details:
             out["neighbor_window_ids"] = neighbor_window_ids
+            out["neighbor_raw_starts"] = neighbor_raw_starts
             out["neighbor_context_distances"] = neighbor_context_distances
             out["neighbor_valid_masks"] = neighbor_valid_masks
         return out
@@ -1623,11 +1888,13 @@ class MemoryBank:
                 "labels": self.prototype_labels,
                 "members": self.prototype_members,
             },
+            "build_stats": self.build_stats,
             "scales": [
                 {
                     "z": scale.z,
                     "c": scale.c,
                     "window_ids": scale.window_ids,
+                    "raw_starts": scale.raw_starts,
                     "coverage_threshold": scale.coverage_threshold,
                 }
                 for scale in self.scales
@@ -1670,6 +1937,7 @@ class MemoryBank:
                 z=scale_payload["z"],
                 c=scale_payload["c"],
                 window_ids=scale_payload["window_ids"],
+                raw_starts=scale_payload.get("raw_starts"),
                 coverage_threshold=float(scale_payload["coverage_threshold"]),
             )
             for scale_payload in payload["scales"]
@@ -1685,6 +1953,7 @@ class MemoryBank:
             prototype_centers=prototype_payload.get("centers"),
             prototype_labels=prototype_payload.get("labels"),
             prototype_members=prototype_payload.get("members"),
+            build_stats=payload.get("build_stats"),
             build_index=False,
         )
         loaded = memory.state_index.load(config.faiss_index_path, memory.state_bank.numpy())

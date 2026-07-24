@@ -1,0 +1,19 @@
+name: memto-cu126-compat
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pytorch=2.7.1
+  - pytorch-cuda=12.6
+  - numpy
+  - pandas
+  - scipy
+  - scikit-learn
+  - tqdm
+  - psutil
+  - pip
+  - pip:
+      - kmeans-pytorch==0.3
+      - pynvml

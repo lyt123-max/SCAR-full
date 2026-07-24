@@ -21,6 +21,21 @@ DEFAULT_RETRIES = 3
 CHUNK_SIZE = 1024 * 1024
 
 
+def official_idv_for_file_fault(file_fault_id: int) -> int:
+    file_fault_id = int(file_fault_id)
+    if file_fault_id == 0:
+        return 0
+    if not 1 <= file_fault_id <= 28:
+        raise ValueError(f"TEP file fault id must be in [0, 28], got {file_fault_id}.")
+    return 29 - file_fault_id
+
+
+def format_target(mode: int, file_fault_id: int) -> str:
+    if file_fault_id == 0:
+        return f"M{mode}-d00 (normal)"
+    return f"M{mode}-d{file_fault_id:02d} (official IDV{official_idv_for_file_fault(file_fault_id)})"
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Download selected TEP multi-mode .mat files.")
     parser.add_argument("--base-url", type=str, default=DEFAULT_BASE_URL, help="Raw file base URL of the TEP dataset repo.")
@@ -31,7 +46,7 @@ def parse_args() -> argparse.Namespace:
         type=int,
         nargs="+",
         default=DEFAULT_FAULTS,
-        help="Fault ids to download, e.g. --faults 0 1 4 6 7 10 13 14 27",
+        help="Upstream dXX file numbers, not physical IDV numbers; e.g. --faults 0 1 4 6 7 10 13 14 27",
     )
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, help="Per-request timeout in seconds.")
     parser.add_argument("--retries", type=int, default=DEFAULT_RETRIES, help="Retry count for each file.")
@@ -67,9 +82,10 @@ def download_tep_file(
     download_url = build_download_url(base_url, mode, fault)
     save_path = save_folder / file_name
     temp_path = save_path.with_suffix(save_path.suffix + ".part")
+    target_label = format_target(mode, fault)
 
     if save_path.exists() and not force:
-        return "skipped", f"[SKIP] M{mode}-IDV{fault} -> {file_name} already exists"
+        return "skipped", f"[SKIP] {target_label} -> {file_name} already exists"
 
     last_error = None
     for attempt in range(1, retries + 1):
@@ -82,15 +98,15 @@ def download_tep_file(
                             fh.write(chunk)
             os.replace(temp_path, save_path)
             size_mb = save_path.stat().st_size / (1024 * 1024)
-            return "success", f"[OK] M{mode}-IDV{fault} -> {file_name} ({size_mb:.2f} MB)"
+            return "success", f"[OK] {target_label} -> {file_name} ({size_mb:.2f} MB)"
         except Exception as exc:  # noqa: BLE001
             last_error = exc
             if temp_path.exists():
                 temp_path.unlink()
             if attempt < retries:
-                print(f"[RETRY] M{mode}-IDV{fault} attempt {attempt}/{retries} failed, retrying...")
+                print(f"[RETRY] {target_label} attempt {attempt}/{retries} failed, retrying...")
 
-    return "failed", f"[FAIL] M{mode}-IDV{fault}, error: {last_error}"
+    return "failed", f"[FAIL] {target_label}, error: {last_error}"
 
 
 def main() -> int:
@@ -107,7 +123,7 @@ def main() -> int:
     print("[START] Downloading selected TEP files...")
     print(f"BASE_URL: {args.base_url}")
     print(f"SAVE_FOLDER: {save_folder}")
-    print(f"MODES: {args.modes} | FAULTS: {args.faults}")
+    print(f"MODES: {args.modes} | FILE_FAULTS_DXX: {args.faults}")
     print(f"TOTAL_FILES: {total}")
     print("-" * 60)
 

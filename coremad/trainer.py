@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import random
 import shutil
+import uuid
+from contextlib import nullcontext
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import numpy as np
 import torch
@@ -23,12 +26,17 @@ except Exception:
     HAS_SKLEARN_METRICS = False
 
 try:
-    from vus.metrics import get_metrics as vus_get_metrics
+    from TSB_AD.evaluation.metrics import get_metrics as vus_get_metrics
 
     HAS_VUS_METRICS = True
 except Exception:
-    vus_get_metrics = None
-    HAS_VUS_METRICS = False
+    try:
+        from vus.metrics import get_metrics as vus_get_metrics
+
+        HAS_VUS_METRICS = True
+    except Exception:
+        vus_get_metrics = None
+        HAS_VUS_METRICS = False
 
 from .config import CoReMADConfig
 from .data import (
@@ -38,11 +46,13 @@ from .data import (
     build_data_bundle,
     build_loader,
     load_raw_dataset_bundle,
+    resolve_tep_files,
     transform_raw_bundle,
 )
 from .faiss_index import HAS_FAISS
 from .memory import MemoryBank
 from .model import CoReMADModel
+from .resource_monitor import ResourceMonitor
 from .scorer import CDFPITFusion, ZScoreMeanFusion, fuse_raw_max
 from .visualization import plot_score_distribution, plot_score_timeline, plot_training_curves
 
@@ -63,6 +73,7 @@ BASE_TEST_DIAGNOSTIC_SPECS = [
 STAGE_A_COMPAT_FIELDS = (
     "dataset",
     "data_root",
+    "tep_protocol",
     "seq_len",
     "train_stride",
     "val_ratio",
@@ -101,6 +112,7 @@ STAGE_A_COMPAT_FIELDS = (
 STAGE_B_COMPAT_FIELDS = (
     "dataset",
     "data_root",
+    "tep_protocol",
     "seq_len",
     "memory_build_stride",
     "max_train_windows",
@@ -131,6 +143,8 @@ STAGE_B_COMPAT_FIELDS = (
     "coreset_max_patches_per_scale",
     "coreset_fps_threshold",
     "seed",
+    "memory_seed",
+    "memory_audit_mode",
 )
 
 
@@ -147,7 +161,91 @@ class CoReMADTrainer:
         self.config = config
         self.device = torch.device(config.device)
         self.config.experiment_dir.mkdir(parents=True, exist_ok=True)
+        self._resource_invocation_id = uuid.uuid4().hex
+        self._active_resource_monitor: Optional[ResourceMonitor] = None
+        self._last_diagnostic_workload: dict[str, int] = {}
         set_seed(config.seed)
+
+    def _run_monitored_stage(self, stage: str, operation: Callable[[], Any]) -> Any:
+        if not self.config.resource_monitor_enabled:
+            return operation()
+        monitor = ResourceMonitor(
+            output_path=self.config.resource_metrics_path,
+            method="SCAR",
+            dataset=self.config.dataset,
+            seed=self.config.seed,
+            stage=stage,
+            device=str(self.device),
+            invocation_id=self._resource_invocation_id,
+            sample_interval=self.config.resource_sample_interval,
+        )
+        previous_monitor = self._active_resource_monitor
+        try:
+            with monitor:
+                self._active_resource_monitor = monitor
+                result = operation()
+                if isinstance(result, bool) and not result:
+                    monitor.mark_skipped("stage artifacts are already complete")
+                self._record_resource_artifacts(stage, monitor)
+                return result
+        finally:
+            self._active_resource_monitor = previous_monitor
+
+    def _resource_span(self, name: str):
+        if self._active_resource_monitor is None:
+            return nullcontext(None)
+        return self._active_resource_monitor.span(name)
+
+    def _record_model_resource_stats(self, model: CoReMADModel) -> None:
+        if self._active_resource_monitor is None:
+            return
+        total = sum(int(parameter.numel()) for parameter in model.parameters())
+        trainable = sum(
+            int(parameter.numel())
+            for parameter in model.parameters()
+            if parameter.requires_grad
+        )
+        self._active_resource_monitor.set_model_stats(
+            total_parameters=total,
+            trainable_parameters=trainable,
+        )
+
+    def _record_resource_artifacts(
+        self,
+        stage: str,
+        monitor: ResourceMonitor,
+    ) -> None:
+        artifact_paths: dict[str, Path] = {"config_bytes": self.config.config_path}
+        if stage == "stage_a":
+            artifact_paths.update(
+                {
+                    "best_checkpoint_bytes": self.config.stage_a_path,
+                    "last_checkpoint_bytes": self.config.stage_a_last_path,
+                }
+            )
+        elif stage == "stage_b":
+            artifact_paths.update(
+                {
+                    "memory_bytes": self.config.memory_path,
+                    "faiss_index_bytes": self.config.faiss_index_path,
+                    "memory_meta_bytes": self.config.memory_meta_path,
+                    "cdf_npz_bytes": self.config.cdf_fusion_path.with_suffix(".npz"),
+                    "cdf_json_bytes": self.config.cdf_fusion_path.with_suffix(".json"),
+                    "zscore_npz_bytes": self.config.zscore_fusion_path.with_suffix(".npz"),
+                    "zscore_json_bytes": self.config.zscore_fusion_path.with_suffix(".json"),
+                }
+            )
+        elif stage == "test":
+            artifact_paths.update(
+                {
+                    "metrics_bytes": self.config.experiment_dir / "test_metrics.json",
+                    "scores_bytes": (
+                        self.config.experiment_dir
+                        / f"test_scores_{self.config.evaluation_score_key}.npy"
+                    ),
+                }
+            )
+        monitor.set_artifact_bytes(**artifact_paths)
 
     def _completion_score_names(self) -> list[str]:
         return self.config.completion_score_names()
@@ -308,7 +406,12 @@ class CoReMADTrainer:
 
         mismatches: dict[str, dict[str, Any]] = {}
         for name, current_value in current.items():
-            stored_value = self._normalize_config_value(stored_config.get(name, "<missing>"))
+            stored_raw = stored_config.get(name, "<missing>")
+            if name == "tep_protocol" and stored_raw == "<missing>":
+                # Checkpoints predating the protocol field were created from the
+                # historical selected subset.
+                stored_raw = "selected"
+            stored_value = self._normalize_config_value(stored_raw)
             if stored_value != current_value:
                 mismatches[name] = {"current": current_value, "stored": stored_value}
         return mismatches
@@ -331,6 +434,21 @@ class CoReMADTrainer:
             return None
         stat = path.stat()
         return {"size": int(stat.st_size), "mtime_ns": int(stat.st_mtime_ns)}
+
+    def _tep_data_file_signatures(self) -> Optional[dict[str, dict[str, Any]]]:
+        if str(self.config.dataset).upper() != "TEP":
+            return None
+        paths, _, _ = resolve_tep_files(
+            self.config.data_root,
+            protocol=self.config.tep_protocol,
+        )
+        return {
+            name: {
+                "path": str(path.resolve()),
+                **(self._file_signature(path) or {}),
+            }
+            for name, path in sorted(paths.items())
+        }
 
     def _stage_a_payload_compatible(
         self,
@@ -458,6 +576,12 @@ class CoReMADTrainer:
             "memory bank artifact",
             f"Run Stage B before {consumer_stage}.",
         )
+        meta = self._load_stage_b_meta()
+        if not self._stage_b_meta_compatible(meta, f"use Stage B artifacts for {consumer_stage}"):
+            raise RuntimeError(
+                f"Stage B artifacts are incompatible with the current configuration for {consumer_stage}. "
+                "Rebuild Stage B with the requested dataset protocol."
+            )
         if self.config.use_faiss and HAS_FAISS:
             self._require_file(
                 self.config.faiss_index_path,
@@ -466,6 +590,9 @@ class CoReMADTrainer:
             )
 
     def run_stage_a(self) -> bool:
+        return bool(self._run_monitored_stage("stage_a", self._run_stage_a_impl))
+
+    def _run_stage_a_impl(self) -> bool:
         self._print_stage_banner("Stage A: Self-supervised representation learning")
         bundle = self.prepare_stage_a_data()
         train_mean, train_std = self._compute_window_subset_stats(
@@ -480,6 +607,7 @@ class CoReMADTrainer:
             )
             print(f"[Diag] val   mean={val_mean:.4f}, std={val_std:.4f}")
         model = CoReMADModel(self.config).to(self.device)
+        self._record_model_resource_stats(model)
         optimizer = AdamW(model.parameters(), lr=self.config.lr, weight_decay=self.config.weight_decay)
         scheduler = CosineAnnealingLR(
             optimizer,
@@ -640,17 +768,30 @@ class CoReMADTrainer:
     def _run_stage_a_epoch(self, model: CoReMADModel, loader: DataLoader, optimizer: AdamW) -> dict[str, float]:
         totals = {"loss": 0.0, "mask_loss": 0.0, "pred_loss": 0.0, "smooth_loss": 0.0}
         count = 0
-        for batch in loader:
-            x = batch["x"].to(self.device, non_blocking=True)
-            losses = model.compute_pretraining_losses(x)
-            optimizer.zero_grad(set_to_none=True)
-            losses["loss"].backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=self.config.grad_clip_norm)
-            optimizer.step()
-            batch_size = x.size(0)
-            count += batch_size
-            for key in totals:
-                totals[key] += float(losses[key].item()) * batch_size
+        batch_count = 0
+        with self._resource_span("train_loop") as resource_span:
+            for batch in loader:
+                x = batch["x"].to(self.device, non_blocking=True)
+                losses = model.compute_pretraining_losses(x)
+                optimizer.zero_grad(set_to_none=True)
+                losses["loss"].backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=self.config.grad_clip_norm)
+                optimizer.step()
+                batch_size = x.size(0)
+                count += batch_size
+                batch_count += 1
+                for key in totals:
+                    totals[key] += float(losses[key].item()) * batch_size
+            workload = {
+                "points": count * self.config.seq_len,
+                "windows": count,
+                "batches": batch_count,
+                "epochs": 1,
+            }
+            if resource_span is not None:
+                resource_span.set_workload(**workload)
+            if self._active_resource_monitor is not None:
+                self._active_resource_monitor.add_workload(**workload)
         return {key: value / max(1, count) for key, value in totals.items()}
 
     def _evaluate_stage_a(self, model: CoReMADModel, loader: Optional[DataLoader]) -> dict[str, float]:
@@ -669,7 +810,15 @@ class CoReMADTrainer:
                     totals[key] += float(losses[key].item()) * batch_size
         return {key: value / max(1, count) for key, value in totals.items()}
 
-    def run_stage_b(self) -> bool:
+    def run_stage_b(self, memory_loader: Optional[DataLoader] = None) -> bool:
+        return bool(
+            self._run_monitored_stage(
+                "stage_b",
+                lambda: self._run_stage_b_impl(memory_loader=memory_loader),
+            )
+        )
+
+    def _run_stage_b_impl(self, memory_loader: Optional[DataLoader] = None) -> bool:
         self._print_stage_banner("Stage B: Building memory bank + fitting fusion calibrators")
         if self._is_stage_b_complete():
             print("[Stage B] completed artifacts detected, skip rebuilding memory bank.")
@@ -679,25 +828,38 @@ class CoReMADTrainer:
         model.eval()
         for param in model.parameters():
             param.requires_grad = False
+        self._record_model_resource_stats(model)
         assert not model.training, "Model must be in eval mode for Stage B."
         raw_bundle = self._load_raw_bundle()
         bundle = self.transform_bundle_with_normalizer(raw_bundle, normalizer)
-        loader = build_loader(
-            bundle.train_full,
-            None,
-            seq_len=self.config.seq_len,
-            stride=self.config.memory_build_stride,
-            batch_size=self.config.memory_batch_size,
-            num_workers=self.config.num_workers,
-            shuffle=False,
-            max_windows=self.config.max_train_windows,
-            drop_last=False,
-            segment_ranges=bundle.train_full_segment_ranges,
-        )
+        loader = memory_loader
+        if loader is None:
+            loader = build_loader(
+                bundle.train_full,
+                None,
+                seq_len=self.config.seq_len,
+                stride=self.config.memory_build_stride,
+                batch_size=self.config.memory_batch_size,
+                num_workers=self.config.num_workers,
+                shuffle=False,
+                max_windows=self.config.max_train_windows,
+                drop_last=False,
+                segment_ranges=bundle.train_full_segment_ranges,
+            )
+            loader_source = "normalized training split"
+        else:
+            loader_source = "caller-provided memory dataset"
         n_windows = len(loader.dataset)
         n_batches = len(loader)
+        stage_b_workload = {
+            "points": len(bundle.train_full),
+            "windows": n_windows,
+            "batches": n_batches,
+        }
+        if self._active_resource_monitor is not None:
+            self._active_resource_monitor.set_workload(**stage_b_workload)
         print(
-            f"[Stage B] loader ready: windows={n_windows}, batches={n_batches}, "
+            f"[Stage B] loader ready: source={loader_source}, windows={n_windows}, batches={n_batches}, "
             f"batch_size={self.config.memory_batch_size}, stride={self.config.memory_build_stride}, "
             f"num_workers={self.config.num_workers}, device={self.device}"
         )
@@ -707,28 +869,42 @@ class CoReMADTrainer:
                 f"[Stage B] scale patch_size={patch_size}: "
                 f"raw_patch_count~={n_windows * n_patches} ({n_patches} patches/window)"
             )
-        memory = MemoryBank.build(model, loader, self.config, self.device)
-        memory.sanity_check()
-        memory.save(self.config.memory_path)
-        train_diags, train_scores_count = self._aggregate_point_diagnostics(
-            data=bundle.train_full,
-            labels=None,
-            model=model,
-            memory=memory,
-            batch_size=self.config.memory_batch_size,
-            stride=self.config.memory_build_stride,
-            max_windows=self.config.max_train_windows,
-            print_stsd_stats=False,
-            segment_ranges=bundle.train_full_segment_ranges,
-        )
-        cdf_fusion = self._fit_and_save_cdf_fusion_from_diagnostics(train_diags, train_scores_count)
-        zscore_fusion = self._fit_and_save_zscore_fusion_from_diagnostics(train_diags, train_scores_count)
+        with self._resource_span("memory_build") as resource_span:
+            memory = MemoryBank.build(model, loader, self.config, self.device)
+            memory.sanity_check()
+            memory.save(self.config.memory_path)
+            if resource_span is not None:
+                resource_span.set_workload(**stage_b_workload)
+        with self._resource_span("fusion_fit") as resource_span:
+            train_diags, train_scores_count = self._aggregate_point_diagnostics(
+                data=bundle.train_full,
+                labels=None,
+                model=model,
+                memory=memory,
+                batch_size=self.config.memory_batch_size,
+                stride=self.config.memory_build_stride,
+                max_windows=self.config.max_train_windows,
+                print_stsd_stats=False,
+                segment_ranges=bundle.train_full_segment_ranges,
+            )
+            cdf_fusion = self._fit_and_save_cdf_fusion_from_diagnostics(train_diags, train_scores_count)
+            zscore_fusion = self._fit_and_save_zscore_fusion_from_diagnostics(train_diags, train_scores_count)
+            if resource_span is not None:
+                resource_span.set_workload(**self._last_diagnostic_workload)
         self.config.memory_meta_path.write_text(
             json.dumps(
                 {
                     "num_windows": int(memory.state_bank.size(0)),
                     "num_scales": len(memory.scales),
                     "scale_sizes": [int(scale.z.size(0)) for scale in memory.scales],
+                    "memory_build_stats": memory.build_stats,
+                    "memory_seed": int(self.config.effective_memory_seed),
+                    "memory_audit_mode": self.config.memory_audit_mode,
+                    "coreset_cap_active": any(
+                        int(stats.get("final_count", 0))
+                        < int(stats.get("clean_count", 0))
+                        for stats in memory.build_stats
+                    ),
                     "num_prototypes": int(memory.prototype_centers.size(0)),
                     "prototype_sizes": [int(member.numel()) for member in memory.prototype_members],
                     "cdf_fusion_path": str(self.config.cdf_fusion_path),
@@ -908,6 +1084,12 @@ class CoReMADTrainer:
             f"sequence_{idx}" for idx in range(len(raw_bundle.test_sequence_labels))
         ]
         labels = np.asarray(raw_bundle.test_sequence_labels, dtype=np.int32)
+        test_sequences = raw_bundle.test_sequences
+        if self.config.max_test_sequences:
+            limit = min(int(self.config.max_test_sequences), len(sequence_names))
+            sequence_names = sequence_names[:limit]
+            labels = labels[:limit]
+            test_sequences = test_sequences[:limit]
         print(
             f"[Test][SequenceOnly] enabled: n_sequences={len(sequence_names)} "
             f"aggregation={self.config.sequence_score_aggregation}"
@@ -921,40 +1103,131 @@ class CoReMADTrainer:
         sequence_score_store: dict[str, list[float]] = {}
         covered_mask = np.zeros(len(sequence_names), dtype=bool)
         coverage_ratio = np.zeros(len(sequence_names), dtype=np.float64)
+        use_sequence_shards = (
+            str(self.config.dataset).upper() == "TEP"
+            and str(self.config.tep_protocol).lower() == "full"
+        )
+        shard_dir = self.config.experiment_dir / "test_sequence_shards"
+        signature_payload = {
+            "schema_version": 1,
+            "dataset": str(self.config.dataset),
+            "data_root": str(Path(self.config.data_root).resolve()),
+            "tep_protocol": str(self.config.tep_protocol),
+            "seq_len": int(self.config.seq_len),
+            "test_stride": int(self.config.test_stride),
+            "max_test_windows": int(self.config.max_test_windows),
+            "max_test_sequences": int(self.config.max_test_sequences),
+            "sequence_score_aggregation": str(self.config.sequence_score_aggregation),
+            "evaluation_score_key": str(self.config.evaluation_score_key),
+            "stage_a": self._file_signature(self.config.stage_a_path),
+            "memory": self._file_signature(self.config.memory_path),
+            "cdf_npz": self._file_signature(self.config.cdf_fusion_path.with_suffix(".npz")),
+            "cdf_json": self._file_signature(self.config.cdf_fusion_path.with_suffix(".json")),
+            "zscore_json": self._file_signature(self.config.zscore_fusion_path.with_suffix(".json")),
+            "tep_data_files": self._tep_data_file_signatures(),
+        }
+        shard_signature = hashlib.sha256(
+            json.dumps(signature_payload, sort_keys=True, ensure_ascii=True).encode("utf-8")
+        ).hexdigest()
+        if use_sequence_shards:
+            shard_dir.mkdir(parents=True, exist_ok=True)
 
         for idx, (seq_name, seq_label, sequence) in enumerate(
-            zip(sequence_names, labels.tolist(), raw_bundle.test_sequences)
+            zip(sequence_names, labels.tolist(), test_sequences)
         ):
+            shard_path = shard_dir / f"{Path(str(seq_name)).stem}.npz"
+            cached_scores: Optional[dict[str, float]] = None
+            if use_sequence_shards and self.config.resume and shard_path.exists():
+                try:
+                    cached = np.load(shard_path, allow_pickle=False)
+                    cached_signature = str(np.asarray(cached["signature"]).item())
+                    cached_name = str(np.asarray(cached["sequence_name"]).item())
+                    cached_label = int(np.asarray(cached["label"]).item())
+                    if (
+                        cached_signature == shard_signature
+                        and cached_name == str(seq_name)
+                        and cached_label == int(seq_label)
+                    ):
+                        cached_scores = {
+                            key[len("score__") :]: float(np.asarray(cached[key]).item())
+                            for key in cached.files
+                            if key.startswith("score__")
+                        }
+                        required_score_names = {
+                            *self._raw_diagnostic_keys(),
+                            "raw_max",
+                            "zscore_mean",
+                            "cdf_max",
+                            "cdf_mean",
+                            "cdf_mean_soft_support",
+                            "cdf_softmax",
+                            "selected",
+                        }
+                        if not required_score_names.issubset(cached_scores):
+                            cached_scores = None
+                        covered_mask[idx] = bool(int(np.asarray(cached["covered"]).item()))
+                        coverage_ratio[idx] = float(np.asarray(cached["coverage_ratio"]).item())
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[Test][SequenceOnly] ignore invalid shard={shard_path}: {exc}")
+            if cached_scores:
+                print(f"[Test][SequenceOnly] resume shard sequence={seq_name}")
+                for name, scalar in cached_scores.items():
+                    sequence_score_store.setdefault(name, []).append(float(scalar))
+                continue
+
             seq_array = np.asarray(sequence, dtype=np.float32)
             seq_norm = normalizer.transform(seq_array)
             print(
                 f"[Test][SequenceOnly] sequence={seq_name} label={int(seq_label)} "
                 f"length={len(seq_array)}"
             )
-            seq_diags, seq_scores_count = self._aggregate_point_diagnostics(
-                data=seq_norm,
-                labels=None,
-                model=model,
-                memory=memory,
-                batch_size=self.config.test_batch_size,
-                stride=self.config.test_stride,
-                max_windows=self.config.max_test_windows,
-                print_stsd_stats=(idx == 0),
-                segment_ranges=None,
-            )
-            _, _, metric_sources, _ = self._build_metric_sources_from_point_diags(
-                seq_diags,
-                cdf_fusion,
-                zscore_fusion,
-            )
+            with self._resource_span("scoring") as resource_span:
+                seq_diags, seq_scores_count = self._aggregate_point_diagnostics(
+                    data=seq_norm,
+                    labels=None,
+                    model=model,
+                    memory=memory,
+                    batch_size=self.config.test_batch_size,
+                    stride=self.config.test_stride,
+                    max_windows=self.config.max_test_windows,
+                    print_stsd_stats=(idx == 0),
+                    segment_ranges=None,
+                )
+                _, _, metric_sources, _ = self._build_metric_sources_from_point_diags(
+                    seq_diags,
+                    cdf_fusion,
+                    zscore_fusion,
+                )
+                if resource_span is not None:
+                    resource_span.set_workload(**self._last_diagnostic_workload)
+                if self._active_resource_monitor is not None:
+                    self._active_resource_monitor.add_workload(**self._last_diagnostic_workload)
             observed_mask = np.asarray(seq_scores_count, dtype=np.float64) > 0
             covered_here = bool(np.any(observed_mask))
             coverage_here = float(observed_mask.mean()) if observed_mask.size else 0.0
             covered_mask[idx] = covered_here
             coverage_ratio[idx] = coverage_here
+            sequence_result: dict[str, float] = {}
             for name, point_scores in metric_sources.items():
                 scalar, _, _ = self._aggregate_sequence_scalar(point_scores, observed_mask=observed_mask)
                 sequence_score_store.setdefault(name, []).append(float(scalar))
+                sequence_result[name] = float(scalar)
+            if use_sequence_shards:
+                temp_path = shard_path.with_suffix(".npz.part")
+                with temp_path.open("wb") as handle:
+                    np.savez(
+                        handle,
+                        signature=np.asarray(shard_signature),
+                        sequence_name=np.asarray(str(seq_name)),
+                        label=np.asarray(int(seq_label), dtype=np.int32),
+                        covered=np.asarray(int(covered_here), dtype=np.int8),
+                        coverage_ratio=np.asarray(coverage_here, dtype=np.float64),
+                        **{
+                            f"score__{name}": np.asarray(value, dtype=np.float64)
+                            for name, value in sequence_result.items()
+                        },
+                    )
+                temp_path.replace(shard_path)
 
         sequence_scores = {
             name: np.asarray(values, dtype=np.float64)
@@ -968,14 +1241,17 @@ class CoReMADTrainer:
             )
 
         sequence_metrics: dict[str, dict[str, float]] = {}
-        for name, scores in sequence_scores.items():
-            seq_metrics = self._compute_sequence_metrics(labels, scores)
-            sequence_metrics[name] = seq_metrics
-            print(
-                f"[Test][SequenceOnly] {name}: roc_auc={seq_metrics['roc_auc']:.6f} "
-                f"pr_auc={seq_metrics['pr_auc']:.6f} "
-                f"f1={seq_metrics['best_f1']:.6f}"
-            )
+        with self._resource_span("evaluation") as resource_span:
+            for name, scores in sequence_scores.items():
+                seq_metrics = self._compute_sequence_metrics(labels, scores)
+                sequence_metrics[name] = seq_metrics
+                print(
+                    f"[Test][SequenceOnly] {name}: roc_auc={seq_metrics['roc_auc']:.6f} "
+                    f"pr_auc={seq_metrics['pr_auc']:.6f} "
+                    f"f1={seq_metrics['best_f1']:.6f}"
+                )
+            if resource_span is not None:
+                resource_span.set_workload(points=len(labels))
 
         coverage_summary = {
             "n_total_sequences": int(len(labels)),
@@ -991,6 +1267,12 @@ class CoReMADTrainer:
         metrics = {
             "evaluation_protocol": "sequence_level",
             "sequence_evaluation_mode": "independent_sequences",
+            "classification_metrics_available": bool(np.unique(labels).size >= 2),
+            "classification_metrics_unavailable_reason": (
+                None
+                if np.unique(labels).size >= 2
+                else "single_class_fault_only_mechanism_protocol"
+            ),
             "sequence_score_aggregation": self.config.sequence_score_aggregation,
             "sequence_coverage": coverage_summary,
             "selected_score_key": self.config.evaluation_score_key,
@@ -1003,6 +1285,14 @@ class CoReMADTrainer:
             "cdf_softmax": sequence_metrics["cdf_softmax"],
             "subscores": raw_subscore_metrics,
         }
+        if raw_bundle.dataset_metadata is not None:
+            metrics["dataset_metadata"] = raw_bundle.dataset_metadata
+        if use_sequence_shards:
+            metrics["sequence_shards"] = {
+                "directory": str(shard_dir),
+                "signature": shard_signature,
+                "count": int(len(sequence_names)),
+            }
 
         score_file_map = {
             name: f"test_sequence_scores_{name}.npy"
@@ -1041,10 +1331,11 @@ class CoReMADTrainer:
         print(f"[Test] saved sequence scores: {self.config.experiment_dir / 'test_sequence_scores.npz'}")
         print(f"[Test] saved sequence scores csv: {self.config.experiment_dir / 'test_sequence_scores.csv'}")
 
-        (self.config.experiment_dir / "test_metrics.json").write_text(
-            json.dumps(metrics, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        with self._resource_span("result_export"):
+            (self.config.experiment_dir / "test_metrics.json").write_text(
+                json.dumps(metrics, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
         selected_metrics = sequence_metrics["selected"]
         print(
             f"[Test] final={self.config.evaluation_score_key} protocol=sequence_level "
@@ -1058,10 +1349,19 @@ class CoReMADTrainer:
         return selected_metrics
 
     def run_test(self) -> dict[str, float]:
+        return self._run_monitored_stage("test", self._run_test_impl)
+
+    def _run_test_impl(self) -> dict[str, float]:
         self._print_stage_banner("Testing")
+        if self.config.data_format == "tsb_ad" and not HAS_VUS_METRICS:
+            raise RuntimeError(
+                "TSB-AD evaluation requires the official VUS metrics package. "
+                "Install the dependencies listed in scripts/tsb_ad/requirements.txt."
+            )
         self._require_stage_a_artifacts("testing")
         self._require_memory_artifacts("testing")
         model, normalizer, _ = self.load_stage_a_model()
+        self._record_model_resource_stats(model)
         memory = self.load_memory_bank()
         raw_bundle = self._load_raw_bundle()
         cdf_fusion, zscore_fusion = self._prepare_test_fusions(raw_bundle, normalizer, model, memory)
@@ -1075,23 +1375,28 @@ class CoReMADTrainer:
                 zscore_fusion=zscore_fusion,
             )
         test_norm = normalizer.transform(raw_bundle.test)
-        final_diags, scores_count = self._aggregate_point_diagnostics(
-            data=test_norm,
-            labels=raw_bundle.test_labels,
-            model=model,
-            memory=memory,
-            batch_size=self.config.test_batch_size,
-            stride=self.config.test_stride,
-            max_windows=self.config.max_test_windows,
-            print_stsd_stats=True,
-            segment_ranges=raw_bundle.test_segment_ranges,
-        )
+        with self._resource_span("scoring") as resource_span:
+            final_diags, scores_count = self._aggregate_point_diagnostics(
+                data=test_norm,
+                labels=raw_bundle.test_labels,
+                model=model,
+                memory=memory,
+                batch_size=self.config.test_batch_size,
+                stride=self.config.test_stride,
+                max_windows=self.config.max_test_windows,
+                print_stsd_stats=True,
+                segment_ranges=raw_bundle.test_segment_ranges,
+            )
+            final_diags, raw_metric_sources, metric_sources, selected_scores = self._build_metric_sources_from_point_diags(
+                final_diags,
+                cdf_fusion,
+                zscore_fusion,
+            )
+            if resource_span is not None:
+                resource_span.set_workload(**self._last_diagnostic_workload)
+            if self._active_resource_monitor is not None:
+                self._active_resource_monitor.add_workload(**self._last_diagnostic_workload)
         self._print_knn_distribution_stats(raw_bundle.test_labels, final_diags["knn_distance"])
-        final_diags, raw_metric_sources, metric_sources, selected_scores = self._build_metric_sources_from_point_diags(
-            final_diags,
-            cdf_fusion,
-            zscore_fusion,
-        )
         raw_max_scores = metric_sources["raw_max"]
         zscore_mean_scores = metric_sources["zscore_mean"]
         cdf_max_scores = metric_sources["cdf_max"]
@@ -1099,15 +1404,22 @@ class CoReMADTrainer:
         cdf_mean_soft_support_scores = metric_sources["cdf_mean_soft_support"]
         cdf_softmax_scores = metric_sources["cdf_softmax"]
         all_metrics: dict[str, dict[str, float]] = {}
-        for name, scores in metric_sources.items():
-            mode_metrics = self._compute_metrics(raw_bundle.test_labels, scores)
-            all_metrics[name] = mode_metrics
-            print(
-                f"[Test] {name}: roc_auc={mode_metrics['roc_auc']:.6f} "
-                f"pr_auc={mode_metrics['pr_auc']:.6f} "
-                f"point_f1={mode_metrics['best_f1']:.6f} "
-                f"pa_f1={mode_metrics['pa_best_f1']:.6f}"
-            )
+        with self._resource_span("evaluation") as resource_span:
+            for name, scores in metric_sources.items():
+                mode_metrics = self._compute_metrics(
+                    raw_bundle.test_labels,
+                    scores,
+                    vus_window=raw_bundle.evaluation_vus_window,
+                )
+                all_metrics[name] = mode_metrics
+                print(
+                    f"[Test] {name}: roc_auc={mode_metrics['roc_auc']:.6f} "
+                    f"pr_auc={mode_metrics['pr_auc']:.6f} "
+                    f"point_f1={mode_metrics['best_f1']:.6f} "
+                    f"pa_f1={mode_metrics['pa_best_f1']:.6f}"
+                )
+            if resource_span is not None:
+                resource_span.set_workload(points=len(raw_bundle.test_labels))
 
         sequence_metrics: dict[str, dict[str, float]] = {}
         sequence_scores: dict[str, np.ndarray] = {}
@@ -1183,6 +1495,7 @@ class CoReMADTrainer:
         else:
             metrics = {
                 "evaluation_protocol": "point_level",
+                "point_coverage_ratio": float(np.mean(scores_count > 0)) if scores_count.size else 0.0,
                 "selected_score_key": self.config.evaluation_score_key,
                 "selected": all_metrics["selected"],
                 "raw_max": all_metrics["raw_max"],
@@ -1193,6 +1506,8 @@ class CoReMADTrainer:
                 "cdf_softmax": all_metrics["cdf_softmax"],
                 "subscores": {name: all_metrics[name] for name in raw_metric_sources},
             }
+        if raw_bundle.dataset_metadata is not None:
+            metrics["dataset_metadata"] = raw_bundle.dataset_metadata
         score_file_map = {
             "final_fused_score": "test_scores_final_selected.npy",
             "final_fused_score_legacy_alias": "test_scores.npy",
@@ -1274,11 +1589,12 @@ class CoReMADTrainer:
         print(f"[Test] saved diagnostic scores: {self.config.experiment_dir / 'test_diagnostic_scores.npz'}")
         for score_name, filename in score_file_map.items():
             print(f"[Test] saved {score_name}: {self.config.experiment_dir / filename}")
-        (self.config.experiment_dir / "test_metrics.json").write_text(
-            json.dumps(metrics, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
-        self._export_test_visualizations(selected_scores, raw_bundle.test_labels, final_diags)
+        with self._resource_span("result_export"):
+            (self.config.experiment_dir / "test_metrics.json").write_text(
+                json.dumps(metrics, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            self._export_test_visualizations(selected_scores, raw_bundle.test_labels, final_diags)
         if sequence_metrics:
             selected_metrics = sequence_metrics["selected"]
             print(
@@ -1418,13 +1734,8 @@ class CoReMADTrainer:
     def run_full(self) -> dict[str, float]:
         if self.config.resume and self._is_stage_a_complete():
             print("[Full] stage_a checkpoint detected, enabling resume/skip behavior.")
-        stage_a_updated = self.run_stage_a()
-        if self.config.resume and self._is_stage_b_complete() and not stage_a_updated:
-            print("[Full] memory checkpoint exists, skip stage_b.")
-            stage_b_updated = False
-        else:
-            stage_b_updated = self.run_stage_b()
-        _ = stage_b_updated
+        self.run_stage_a()
+        self.run_stage_b()
         return self.run_test()
 
     def _restore_config_from_stage_a_payload(self, payload: dict) -> None:
@@ -1445,6 +1756,8 @@ class CoReMADTrainer:
             "artifact_root",
             "experiment_name",
             "data_root",
+            "data_format",
+            "tep_protocol",
             "device",
             "resume",
             "batch_size",
@@ -1500,7 +1813,12 @@ class CoReMADTrainer:
             "num_workers",
             "max_train_windows",
             "max_test_windows",
+            "max_test_sequences",
             "seed",
+            "memory_seed",
+            "memory_audit_mode",
+            "resource_monitor_enabled",
+            "resource_sample_interval",
         )
         for field_name in runtime_override_fields:
             setattr(restored, field_name, getattr(current, field_name))
@@ -1508,6 +1826,11 @@ class CoReMADTrainer:
 
     def load_stage_a_model(self) -> tuple[CoReMADModel, TimeSeriesNormalizer, dict]:
         payload = torch.load(self.config.stage_a_path, map_location="cpu", weights_only=False)
+        if not self._stage_a_payload_compatible(payload, "load Stage A checkpoint"):
+            raise RuntimeError(
+                "Stage A checkpoint is incompatible with the current configuration. "
+                "Train or select a checkpoint created with the requested dataset protocol."
+            )
         self._restore_config_from_stage_a_payload(payload)
         model = CoReMADModel(self.config)
         self._load_model_state(model, payload["model_state"])
@@ -1566,6 +1889,14 @@ class CoReMADTrainer:
         )
         total_windows = len(loader.dataset) if hasattr(loader, "dataset") else None
         total_batches = len(loader) if hasattr(loader, "__len__") else None
+        self._last_diagnostic_workload = {
+            "points": 0,
+            "covered_points": 0,
+            "input_points": int(len(data)),
+            "window_points": int(total_windows or 0) * self.config.seq_len,
+            "windows": int(total_windows or 0),
+            "batches": int(total_batches or 0),
+        }
         print(
             f"[DiagAgg] start: windows={total_windows}, batches={total_batches}, "
             f"batch_size={batch_size}, stride={stride}, "
@@ -1593,7 +1924,16 @@ class CoReMADTrainer:
                     print(f"[TestDiag] ratio  slow/total = {slow_ratio:.2%}")
                     printed_stats = True
 
-                diag_tensors = self.extract_point_feature_dict(x, model, memory)
+                with self._resource_span("inference") as resource_span:
+                    diag_tensors = self.extract_point_feature_dict(x, model, memory)
+                    if resource_span is not None:
+                        batch_windows = int(x.size(0))
+                        resource_span.set_workload(
+                            points=batch_windows * self.config.seq_len,
+                            window_points=batch_windows * self.config.seq_len,
+                            windows=batch_windows,
+                            batches=1,
+                        )
                 batch_diags = {
                     name: diag_tensors[name].detach().cpu().numpy()
                     for name in raw_keys
@@ -1614,6 +1954,9 @@ class CoReMADTrainer:
                         f"processed_windows={processed_windows}"
                     )
 
+        covered_points = int(np.count_nonzero(scores_count > 0))
+        self._last_diagnostic_workload["points"] = covered_points
+        self._last_diagnostic_workload["covered_points"] = covered_points
         final_diags = {
             name: values / np.maximum(scores_count, 1.0)
             for name, values in diag_sum.items()
@@ -1948,7 +2291,12 @@ class CoReMADTrainer:
         return max(1, int(np.median(np.asarray(seg_lengths, dtype=np.float64))))
 
     @classmethod
-    def _compute_vus_metrics(cls, labels: np.ndarray, scores: np.ndarray) -> dict[str, float]:
+    def _compute_vus_metrics(
+        cls,
+        labels: np.ndarray,
+        scores: np.ndarray,
+        vus_window: Optional[int] = None,
+    ) -> dict[str, float]:
         if not HAS_VUS_METRICS:
             return {
                 "aff_precision": float("nan"),
@@ -1963,7 +2311,11 @@ class CoReMADTrainer:
 
         labels = np.asarray(labels, dtype=np.int32)
         scores = cls._normalize_scores_01(scores)
-        vus_window = cls._estimate_vus_window(labels)
+        vus_window = (
+            max(1, int(vus_window))
+            if vus_window is not None
+            else cls._estimate_vus_window(labels)
+        )
 
         try:
             results = vus_get_metrics(scores, labels, metric="all", slidingWindow=vus_window)
@@ -2050,7 +2402,12 @@ class CoReMADTrainer:
         return best
 
     @classmethod
-    def _compute_metrics(cls, labels: np.ndarray, scores: np.ndarray) -> dict[str, float]:
+    def _compute_metrics(
+        cls,
+        labels: np.ndarray,
+        scores: np.ndarray,
+        vus_window: Optional[int] = None,
+    ) -> dict[str, float]:
         labels = labels.astype(np.float32)
         if HAS_SKLEARN_METRICS:
             precision, recall, thresholds = precision_recall_curve(labels, scores)
@@ -2089,7 +2446,7 @@ class CoReMADTrainer:
         }
         point_metrics.update(cls._compute_pa_best_metrics(labels, scores))
         point_metrics.update(cls._compute_event_best_metrics(labels, scores))
-        point_metrics.update(cls._compute_vus_metrics(labels, scores))
+        point_metrics.update(cls._compute_vus_metrics(labels, scores, vus_window=vus_window))
         return point_metrics
 
     @staticmethod

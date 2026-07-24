@@ -2,11 +2,25 @@
 
 These scripts keep the main TEP train/test pipeline unchanged and move mechanism auditing offline.
 Under the current TEP protocol, normal-mode mechanism audit is taken from validation normal windows, while fault mechanism analysis is taken from independent fault test sequences.
-The current selected TEP subset uses normal files `m1d00`, `m3d00`, and `m4d00` (modes `M1`, `M3`, and `M4`, all with normal identifier `IDV0`) and fault files with identifiers `IDV1`, `IDV4`, `IDV6`, `IDV7`, `IDV10`, `IDV13`, `IDV14`, and `IDV27` under each selected mode.
+Two protocols are supported:
+
+- `selected` (default): normal files from `M1/M3/M4` and eight fault files per mode.
+- `full`: all normal files from `M1-M6` and all 28 fault files per mode (168 fault sequences).
+
+Following the upstream official setting, files `d01` through `d28` map in reverse order to physical disturbances `IDV28` through `IDV1`. Metadata keeps both `file_fault_id` (`dXX`) and `fault_id` (official IDV).
+
+Run the complete protocol:
+
+```bash
+DATA_ROOT=./Multi-mode-Fault-Diagnosis-Datasets-with-TE-process \
+bash scripts/main/train_tep_full.sh full tep_full_mechanism
+```
+
+Resume an interrupted run by setting `RESUME=1` and the exact existing `EXP_NAME`.
 
 `scripts/ablation/run_tep.sh` now calls this offline pipeline automatically after any TEP ablation run that reaches `test`.
 Set `TEP_MECHANISM_POSTPROCESS=0` if you want to disable that automatic step.
-For the paper-facing summary, `TEP` should be reported separately from the point-wise main ablation table, with the sequence-level main metrics fixed to `AUROC`, `AUPRC`, and `F1`.
+For the paper-facing summary, `TEP` is reported separately from the point-wise main ablation table. The full protocol contains fault-only positive sequences, so it reports mechanism metrics instead of undefined `AUROC`, `AUPRC`, and `F1`.
 
 ## 1. Export mechanism logs
 
@@ -14,16 +28,20 @@ For the paper-facing summary, `TEP` should be reported separately from the point
 python scripts/tep/export_mechanism_logs.py --experiment_dir artifacts/tep_baseline_xxx
 ```
 
-Outputs go to `artifacts/<exp>/tep_mechanism/`:
+Selected-protocol outputs keep the legacy monolithic layout. Full-protocol outputs go to `artifacts/<exp>/tep_mechanism/`:
 
 - `train_state_meta.npz`
 - `audit_normal_window_logs.npz`
 - `audit_normal_window_logs.csv`
-- `fault_window_logs.npz`
-- `fault_window_logs.csv`
+- `fault_window_shards/*.npz` (all windows, compact per-sequence metric shards)
+- `fault_detail_shards/*.npz` (bounded visualization samples)
+- `fault_detail_sample.npz`
+- `fault_window_shards_manifest.json`
 - `fault_sequence_scores_with_meta.json`
 - `sequence_scores_with_meta.json`
 - `export_meta.json`
+
+The full protocol does not write a multi-gigabyte fault-window CSV. Both sequence testing and mechanism export are resumable.
 
 ## 2. Compute mechanism metrics
 
@@ -48,7 +66,9 @@ Main metrics:
 - `SFR`
 - `Mode-FPR-Std`
 - `SMR@K`
+- `SMR@K-sequence-balanced`
 - `delta_mem_mode`
+- `fault-normal-gap-sequence-balanced`
 - `EE95`
 - `Tail@0.99_error`
 - `Fault-Consistency-Std`
@@ -56,6 +76,7 @@ Main metrics:
 - `Proto-Purity`
 - `Proto-Entropy`
 - `Cross-mode-margin`
+- `cross-mode-margin-sequence-balanced`
 - `CG_mean`
 - `%_multi_best`
 
@@ -80,6 +101,7 @@ Key figures:
 - `normal_final_violin_by_mode.png`
 - `retrieval_mode_confusion_heatmap.png`
 - `exceedance_plot.png`
+- `mode_fpr_and_fault_normal_gap.png`
 - `fault_file_gain_heatmap.png`
 - `fault_evidence_heatmap.png`
 - `fault_triplet_consistency.png`
@@ -112,3 +134,17 @@ To collect the sequence-level TEP summary together with mechanism-metric and fig
 ```bash
 python scripts/ablation/generate_paper_tables.py
 ```
+
+For rebuttal tables T2 and T9:
+
+```bash
+python scripts/tep/generate_rebuttal_tables.py \
+  --full-experiment artifacts/tep_full_mechanism_xxx \
+  --selected-experiment TEP-abalation/tep_ablation_full_20260418_193550 \
+  --output-dir artifacts/tep_full_mechanism_xxx/tep_rebuttal_tables
+```
+
+When `--selected-experiment` is omitted, the table generator discovers the latest
+selected TEP baseline under `artifacts/` or `TEP-abalation/`. Historical schema-v2
+metrics missing sequence-balanced fields are recomputed in memory without modifying
+the old experiment directory.

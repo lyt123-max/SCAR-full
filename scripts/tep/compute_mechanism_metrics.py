@@ -9,6 +9,7 @@ import numpy as np
 
 from tep_common import (
     empirical_percentile,
+    iter_fault_log_shards,
     load_sequence_scores_with_meta,
     load_train_state_meta,
     load_window_logs,
@@ -33,18 +34,26 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _pairwise_knn_indices(x: np.ndarray, k: int) -> np.ndarray:
+def _pairwise_knn_indices(x: np.ndarray, k: int, block_size: int = 256) -> np.ndarray:
     x = np.asarray(x, dtype=np.float64)
     n = x.shape[0]
     if n <= 1:
         return np.empty((n, 0), dtype=np.int64)
     k_eff = min(max(1, int(k)), n - 1)
-    dists = np.sum((x[:, None, :] - x[None, :, :]) ** 2, axis=2)
-    np.fill_diagonal(dists, np.inf)
-    part = np.argpartition(dists, kth=np.arange(k_eff), axis=1)[:, :k_eff]
-    part_dists = np.take_along_axis(dists, part, axis=1)
-    order = np.argsort(part_dists, axis=1)
-    return np.take_along_axis(part, order, axis=1)
+    norms = np.sum(np.square(x), axis=1)
+    output = np.empty((n, k_eff), dtype=np.int64)
+    for start in range(0, n, max(1, int(block_size))):
+        end = min(n, start + max(1, int(block_size)))
+        dists = norms[start:end, None] + norms[None, :] - 2.0 * (x[start:end] @ x.T)
+        dists = np.maximum(dists, 0.0)
+        local_rows = np.arange(end - start)
+        global_rows = np.arange(start, end)
+        dists[local_rows, global_rows] = np.inf
+        part = np.argpartition(dists, kth=k_eff - 1, axis=1)[:, :k_eff]
+        part_dists = np.take_along_axis(dists, part, axis=1)
+        order = np.argsort(part_dists, axis=1)
+        output[start:end] = np.take_along_axis(part, order, axis=1)
+    return output
 
 
 def _safe_mean(values: list[float]) -> float:
@@ -130,7 +139,7 @@ def _compute_prototype_metrics(train_state_meta: dict[str, np.ndarray]) -> tuple
 
 def compute_single_metrics(
     audit_logs: dict[str, np.ndarray],
-    fault_logs: dict[str, np.ndarray],
+    fault_logs: dict[str, np.ndarray] | Path,
     train_state_meta: dict[str, np.ndarray],
     fault_sequence_records: list[dict[str, Any]],
     smc_k: int,
@@ -141,10 +150,6 @@ def compute_single_metrics(
     audit_state = np.asarray(audit_logs["state_vec"], dtype=np.float64)
     audit_final = np.asarray(audit_logs["final"], dtype=np.float64)
     audit_memory = np.asarray(audit_logs["memory_distance"], dtype=np.float64)
-
-    fault_mode_id = np.asarray(fault_logs["mode_id"], dtype=np.int32)
-    fault_memory = np.asarray(fault_logs["memory_distance"], dtype=np.float64)
-    fault_topk_mode_ids = np.asarray(fault_logs["topk_neighbor_mode_ids"], dtype=np.int32)
 
     knn_idx = _pairwise_knn_indices(audit_state, smc_k)
     smc_values = [
@@ -175,32 +180,104 @@ def compute_single_metrics(
         per_mode_fpr[str(current_mode)] = float(np.mean(audit_final[group_mask] > global_threshold))
     mode_fpr_std = float(np.std(list(per_mode_fpr.values()))) if per_mode_fpr else float("nan")
 
-    smr_values = []
-    cross_mode_margin_terms = []
-    valid_neighbor_mask = fault_topk_mode_ids >= 0
-    fault_topk_distances = np.asarray(fault_logs["topk_neighbor_distances"], dtype=np.float64)
-    for row_idx in range(len(fault_mode_id)):
-        valid_modes = fault_topk_mode_ids[row_idx][valid_neighbor_mask[row_idx]][:smr_k]
-        valid_dists = fault_topk_distances[row_idx][valid_neighbor_mask[row_idx]][:smr_k]
-        if valid_modes.size == 0:
-            continue
-        same_mask = valid_modes == fault_mode_id[row_idx]
-        smr_values.append(float(np.mean(same_mask)))
-        if np.any(same_mask) and np.any(~same_mask):
-            same_mean = float(np.mean(valid_dists[same_mask]))
-            cross_mean = float(np.mean(valid_dists[~same_mask]))
-            cross_mode_margin_terms.append(cross_mean - same_mean)
-    smr_at_k = _safe_mean(smr_values)
-    cross_mode_margin = _safe_mean(cross_mode_margin_terms)
+    fault_payloads = (
+        [fault_logs]
+        if isinstance(fault_logs, dict)
+        else iter_fault_log_shards(fault_logs)
+    )
+    smr_sum = 0.0
+    smr_count = 0
+    cross_margin_sum = 0.0
+    cross_margin_count = 0
+    mode_fault_sum: dict[int, float] = {}
+    mode_fault_count: dict[int, int] = {}
+    sequence_smr: list[float] = []
+    sequence_cross_margin: list[float] = []
+    sequence_fault_gap: list[float] = []
+    n_fault_windows = 0
+    normal_memory_mean = {
+        int(mode): float(np.mean(audit_memory[audit_mode_id == mode]))
+        for mode in np.unique(audit_mode_id).tolist()
+        if np.any(audit_mode_id == mode)
+    }
+    for fault_payload in fault_payloads:
+        payload_mode = np.asarray(fault_payload["mode_id"], dtype=np.int32)
+        payload_memory = np.asarray(fault_payload["memory_distance"], dtype=np.float64)
+        payload_neighbor_modes = np.asarray(
+            fault_payload["topk_neighbor_mode_ids"],
+            dtype=np.int32,
+        )
+        payload_neighbor_distances = np.asarray(
+            fault_payload["topk_neighbor_distances"],
+            dtype=np.float64,
+        )
+        payload_names = np.asarray(fault_payload["sequence_name"], dtype=object)
+        n_fault_windows += len(payload_mode)
+        for mode_id in np.unique(payload_mode).tolist():
+            mask = payload_mode == int(mode_id)
+            mode_fault_sum[int(mode_id)] = mode_fault_sum.get(int(mode_id), 0.0) + float(
+                np.sum(payload_memory[mask], dtype=np.float64)
+            )
+            mode_fault_count[int(mode_id)] = mode_fault_count.get(int(mode_id), 0) + int(
+                np.sum(mask)
+            )
 
+        row_smr = np.full(len(payload_mode), np.nan, dtype=np.float64)
+        row_margin = np.full(len(payload_mode), np.nan, dtype=np.float64)
+        for row_idx in range(len(payload_mode)):
+            valid_mask = payload_neighbor_modes[row_idx] >= 0
+            valid_modes = payload_neighbor_modes[row_idx][valid_mask][:smr_k]
+            valid_dists = payload_neighbor_distances[row_idx][valid_mask][:smr_k]
+            if valid_modes.size == 0:
+                continue
+            same_mask = valid_modes == payload_mode[row_idx]
+            row_smr[row_idx] = float(np.mean(same_mask))
+            if np.any(same_mask) and np.any(~same_mask):
+                row_margin[row_idx] = float(
+                    np.mean(valid_dists[~same_mask]) - np.mean(valid_dists[same_mask])
+                )
+        finite_smr = row_smr[np.isfinite(row_smr)]
+        finite_margin = row_margin[np.isfinite(row_margin)]
+        smr_sum += float(np.sum(finite_smr, dtype=np.float64))
+        smr_count += int(len(finite_smr))
+        cross_margin_sum += float(np.sum(finite_margin, dtype=np.float64))
+        cross_margin_count += int(len(finite_margin))
+
+        for sequence_name in np.unique(payload_names).tolist():
+            sequence_mask = payload_names == sequence_name
+            sequence_modes = np.unique(payload_mode[sequence_mask])
+            if len(sequence_modes) != 1:
+                raise ValueError(
+                    f"TEP sequence {sequence_name!r} spans multiple modes: {sequence_modes.tolist()}"
+                )
+            sequence_mode = int(sequence_modes[0])
+            seq_smr_values = row_smr[sequence_mask]
+            seq_smr_values = seq_smr_values[np.isfinite(seq_smr_values)]
+            if len(seq_smr_values):
+                sequence_smr.append(float(np.mean(seq_smr_values)))
+            seq_margin_values = row_margin[sequence_mask]
+            seq_margin_values = seq_margin_values[np.isfinite(seq_margin_values)]
+            if len(seq_margin_values):
+                sequence_cross_margin.append(float(np.mean(seq_margin_values)))
+            if sequence_mode in normal_memory_mean:
+                sequence_fault_gap.append(
+                    float(np.mean(payload_memory[sequence_mask]))
+                    - normal_memory_mean[sequence_mode]
+                )
+
+    smr_at_k = float(smr_sum / smr_count) if smr_count else float("nan")
+    cross_mode_margin = (
+        float(cross_margin_sum / cross_margin_count)
+        if cross_margin_count
+        else float("nan")
+    )
     per_mode_gap = {}
     delta_terms = []
-    for current_mode in sorted(np.unique(np.concatenate([audit_mode_id, fault_mode_id], axis=0)).tolist()):
-        mode_normal = audit_memory[audit_mode_id == current_mode]
-        mode_fault = fault_memory[fault_mode_id == current_mode]
-        if len(mode_normal) == 0 or len(mode_fault) == 0:
+    for current_mode in sorted(mode_fault_sum):
+        if current_mode not in normal_memory_mean or mode_fault_count[current_mode] <= 0:
             continue
-        gap = float(np.mean(mode_fault) - np.mean(mode_normal))
+        mode_fault_mean = mode_fault_sum[current_mode] / mode_fault_count[current_mode]
+        gap = float(mode_fault_mean - normal_memory_mean[current_mode])
         per_mode_gap[str(current_mode)] = gap
         delta_terms.append(gap)
     delta_mem_mode = _safe_mean(delta_terms)
@@ -263,7 +340,9 @@ def compute_single_metrics(
         "SFR": sfr,
         "Mode-FPR-Std": mode_fpr_std,
         "SMR@K": smr_at_k,
+        "SMR@K-sequence-balanced": _safe_mean(sequence_smr),
         "delta_mem_mode": delta_mem_mode,
+        "fault-normal-gap-sequence-balanced": _safe_mean(sequence_fault_gap),
         "EE95": _safe_mean(ee95_terms),
         "Tail@0.99_error": _safe_mean(ee99_terms),
         "Fault-Consistency-Std": _safe_mean(fault_std_terms),
@@ -271,6 +350,7 @@ def compute_single_metrics(
         "Proto-Purity": proto_purity,
         "Proto-Entropy": proto_entropy,
         "Cross-mode-margin": cross_mode_margin,
+        "cross-mode-margin-sequence-balanced": _safe_mean(sequence_cross_margin),
         "normal_global_threshold_q95": threshold95,
         "normal_global_threshold_q99": threshold99,
         "per_mode_fpr": per_mode_fpr,
@@ -280,7 +360,7 @@ def compute_single_metrics(
         "per_fault_consistency_std": per_fault_consistency,
         "exceedance_curve": exceedance_curve,
         "n_audit_normal_windows": int(len(audit_final)),
-        "n_fault_windows": int(len(fault_memory)),
+        "n_fault_windows": int(n_fault_windows),
         "n_fault_sequences": int(len(fault_sequence_rows)),
         "fault_ids_present": sorted({int(row["fault_id"]) for row in fault_sequence_rows}),
     }
@@ -291,7 +371,7 @@ def _load_experiment_payload(exp_dir: Path, log_subdir: str) -> dict[str, Any]:
     log_dir = exp_dir / log_subdir
     return {
         "audit_logs": load_window_logs(log_dir, prefix="audit_normal_window_logs"),
-        "fault_logs": load_window_logs(log_dir, prefix="fault_window_logs"),
+        "fault_logs": log_dir,
         "train_state_meta": load_train_state_meta(log_dir),
         "fault_sequence_records": load_sequence_scores_with_meta(log_dir, filename="fault_sequence_scores_with_meta.json"),
     }
@@ -408,26 +488,30 @@ def main() -> None:
     )
     print(f"[TEP Metrics] wrote json: {json_path}")
 
-    csv_lines = [
-        "experiment,SMC@K,SFR,Mode-FPR-Std,SMR@K,delta_mem_mode,EE95,Tail@0.99_error,Fault-Consistency-Std,Evidence-Dom-Consistency,Proto-Purity,Proto-Entropy,Cross-mode-margin"
+    csv_metric_keys = [
+        "SMC@K",
+        "SFR",
+        "Mode-FPR-Std",
+        "SMR@K",
+        "SMR@K-sequence-balanced",
+        "delta_mem_mode",
+        "fault-normal-gap-sequence-balanced",
+        "EE95",
+        "Tail@0.99_error",
+        "Fault-Consistency-Std",
+        "Evidence-Dom-Consistency",
+        "Proto-Purity",
+        "Proto-Entropy",
+        "Cross-mode-margin",
+        "cross-mode-margin-sequence-balanced",
     ]
+    csv_lines = ["experiment," + ",".join(csv_metric_keys)]
     for exp_name, metrics in summary["experiments"].items():
         csv_lines.append(
             ",".join(
                 [
                     exp_name,
-                    f"{float(metrics['SMC@K']):.10f}",
-                    f"{float(metrics['SFR']):.10f}",
-                    f"{float(metrics['Mode-FPR-Std']):.10f}",
-                    f"{float(metrics['SMR@K']):.10f}",
-                    f"{float(metrics['delta_mem_mode']):.10f}",
-                    f"{float(metrics['EE95']):.10f}",
-                    f"{float(metrics['Tail@0.99_error']):.10f}",
-                    f"{float(metrics['Fault-Consistency-Std']):.10f}",
-                    f"{float(metrics['Evidence-Dom-Consistency']):.10f}",
-                    f"{float(metrics['Proto-Purity']):.10f}",
-                    f"{float(metrics['Proto-Entropy']):.10f}",
-                    f"{float(metrics['Cross-mode-margin']):.10f}",
+                    *[f"{float(metrics[key]):.10f}" for key in csv_metric_keys],
                 ]
             )
         )

@@ -86,6 +86,8 @@ MAX_TRAIN_WINDOWS="${MAX_TRAIN_WINDOWS:-0}"
 MAX_TEST_WINDOWS="${MAX_TEST_WINDOWS:-0}"
 EVALUATION_SCORE_KEY="${EVALUATION_SCORE_KEY:-cdf_mean}"
 SEED="${SEED:-42}"
+MEMORY_AUDIT_MODE="${MEMORY_AUDIT_MODE:-full}"
+RESOURCE_MONITOR="${RESOURCE_MONITOR:-1}"
 
 if [[ "${DATASET_NAME^^}" == "TEP" && "${MAX_TEST_WINDOWS}" != "0" ]]; then
   echo "[${DATASET_NAME^^} Script] overriding MAX_TEST_WINDOWS=${MAX_TEST_WINDOWS} -> 0 to preserve full sequence coverage."
@@ -112,6 +114,8 @@ COMMON_ARGS=(
   --artifact_root "${ARTIFACT_ROOT}"
   --experiment_name "${EXP_NAME}"
   --resume "${RESUME}"
+  --memory_audit_mode "${MEMORY_AUDIT_MODE}"
+  --resource_monitor "${RESOURCE_MONITOR}"
   --seq_len "${SEQ_LEN}"
   --batch_size "${BATCH_SIZE}"
   --train_batch_size "${TRAIN_BATCH_SIZE}"

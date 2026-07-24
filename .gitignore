@@ -29,6 +29,7 @@ temp/
 # Training datasets and generated artifacts
 dataset/
 TEP-DATA/
+Multi-mode-Fault-Diagnosis-Datasets-with-TE-process/
 artifacts/
 main-result/
 GECCO-ablation/
@@ -54,3 +55,11 @@ lostdata/
 build/
 dist/
 *.egg-info/
+
+# External baseline repositories (kept as independent Git worktrees)
+third_party/baselines/*/
+
+# Local paper materials and upstream source snapshots
+CATCH-master/
+Formatting_Instructions_For_NeurIPS_2026/
+SCAR论文.pdf

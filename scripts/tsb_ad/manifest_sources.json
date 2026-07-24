@@ -1,0 +1,14 @@
+{
+  "source_repository": "https://github.com/TheDatumOrg/TSB-AD",
+  "source_directory": "Datasets/File_List",
+  "retrieved_at": "2026-07-24",
+  "expected_counts": {
+    "TSB-AD-M.csv": 200,
+    "TSB-AD-M-Tuning.csv": 20,
+    "TSB-AD-M-Eva.csv": 180,
+    "TSB-AD-U.csv": 870,
+    "TSB-AD-U-Tuning.csv": 48,
+    "TSB-AD-U-Eva.csv": 350,
+    "TSB-AD-U-Eva-Full.csv": 822
+  }
+}

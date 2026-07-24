@@ -1,0 +1,2 @@
+# Official metric implementation used for VUS-PR and VUS-ROC.
+TSB-AD==1.5

@@ -12,6 +12,8 @@ import torch
 class CoReMADConfig:
     dataset: str = "MSL"
     data_root: str = "./dataset/anomaly_detect"
+    data_format: str = "auto"
+    tep_protocol: str = "selected"
     artifact_root: str = "./artifacts"
     experiment_name: str = "coremad_default"
 
@@ -31,6 +33,7 @@ class CoReMADConfig:
     num_workers: int = 8
     max_train_windows: int = 0
     max_test_windows: int = 0
+    max_test_sequences: int = 0
     sequence_score_aggregation: str = "p95"
 
     n_channels: int = 55
@@ -92,10 +95,20 @@ class CoReMADConfig:
 
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     seed: int = 42
+    memory_seed: int | None = None
+    memory_audit_mode: str = "none"
     resume: bool = False
+    resource_monitor_enabled: bool = True
+    resource_sample_interval: float = 0.1
 
     def __post_init__(self) -> None:
         self.dataset = str(self.dataset).strip()
+        self.data_format = str(self.data_format).strip().lower()
+        if self.data_format not in {"auto", "detect", "tep", "tsb_ad"}:
+            raise ValueError("data_format must be one of {'auto', 'detect', 'tep', 'tsb_ad'}.")
+        self.tep_protocol = str(self.tep_protocol).strip().lower()
+        if self.tep_protocol not in {"selected", "full"}:
+            raise ValueError("tep_protocol must be one of {'selected', 'full'}.")
         self.batch_size = int(self.batch_size)
         self.train_batch_size = self.batch_size if self.train_batch_size is None else int(self.train_batch_size)
         self.val_batch_size = self.batch_size if self.val_batch_size is None else int(self.val_batch_size)
@@ -107,6 +120,9 @@ class CoReMADConfig:
         for name in ("train_batch_size", "val_batch_size", "memory_batch_size", "test_batch_size"):
             if int(getattr(self, name)) <= 0:
                 raise ValueError(f"{name} must be positive.")
+        for name in ("max_train_windows", "max_test_windows", "max_test_sequences"):
+            if int(getattr(self, name)) < 0:
+                raise ValueError(f"{name} must be non-negative.")
         for patch_size in self.patch_sizes:
             if self.seq_len % patch_size != 0:
                 raise ValueError(
@@ -116,6 +132,16 @@ class CoReMADConfig:
             raise ValueError("val_split_mode must be either 'tail' or 'interleaved'.")
         if self.sequence_score_aggregation not in {"p95", "top5_mean", "max"}:
             raise ValueError("sequence_score_aggregation must be one of {'p95', 'top5_mean', 'max'}.")
+        self.memory_seed = None if self.memory_seed is None else int(self.memory_seed)
+        self.memory_audit_mode = str(self.memory_audit_mode).strip().lower()
+        if self.memory_audit_mode not in {"none", "summary", "full"}:
+            raise ValueError("memory_audit_mode must be one of {'none', 'summary', 'full'}.")
+        self.resource_monitor_enabled = bool(self.resource_monitor_enabled)
+        self.resource_sample_interval = float(self.resource_sample_interval)
+        if self.resource_sample_interval <= 0.0:
+            raise ValueError("resource_sample_interval must be positive.")
+        if not 0.0 <= float(self.clean_ratio) < 1.0:
+            raise ValueError("clean_ratio must be in [0, 1).")
         if self.n_mask_groups <= 0:
             raise ValueError("n_mask_groups must be positive.")
         if self.state_prototype_count < 0:
@@ -182,6 +208,18 @@ class CoReMADConfig:
     @property
     def memory_meta_path(self) -> Path:
         return self.experiment_dir / "memory_meta.json"
+
+    @property
+    def resource_metrics_path(self) -> Path:
+        return self.experiment_dir / "resource_metrics.json"
+
+    @property
+    def memory_audit_dir(self) -> Path:
+        return self.experiment_dir / "memory_audit"
+
+    @property
+    def effective_memory_seed(self) -> int:
+        return int(self.seed if self.memory_seed is None else self.memory_seed)
 
     def scale_weights(self) -> list[float]:
         weights = [1.0 / float(size) for size in self.patch_sizes]

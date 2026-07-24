@@ -9,7 +9,13 @@ from typing import Any
 
 from collect_results import ABLATION_LABELS, format_metric_value, load_metrics_payload, resolve_nested
 from coremad.config import CoReMADConfig
-from coremad.data import TEP_FAULT_FILES, TEP_NORMAL_FILES, TEP_NUM_INPUT_CHANNELS, _load_tep_raw_dataset_bundle
+from coremad.data import (
+    TEP_FAULT_FILES,
+    TEP_NORMAL_FILES,
+    TEP_NUM_INPUT_CHANNELS,
+    _load_tep_raw_dataset_bundle,
+    tep_file_fault_to_idv,
+)
 
 
 DATASET_LABELS = {
@@ -176,7 +182,7 @@ def parse_tep_mode_fault(file_name: str) -> tuple[int, int]:
     if not stem.startswith("m") or "d" not in stem:
         raise ValueError(f"Unsupported TEP file name: {file_name}")
     mode_part, fault_part = stem.split("d", maxsplit=1)
-    return int(mode_part[1:]), int(fault_part)
+    return int(mode_part[1:]), tep_file_fault_to_idv(int(fault_part))
 
 
 def chunked_text(items: list[str], chunk_size: int) -> list[str]:

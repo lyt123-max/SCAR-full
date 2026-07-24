@@ -23,11 +23,14 @@ from plot_mechanism_figures import (
 )
 
 
-MODE_ORDER = [1, 3, 4]
+MODE_ORDER: list[int] = []
 MODE_STYLE = {
     1: {"label": "Mode 1", "color": "#7EA8F8"},
+    2: {"label": "Mode 2", "color": "#F4B36A"},
     3: {"label": "Mode 3", "color": "#A8D39B"},
     4: {"label": "Mode 4", "color": "#EE7875"},
+    5: {"label": "Mode 5", "color": "#B89AE8"},
+    6: {"label": "Mode 6", "color": "#62BFC1"},
 }
 EVIDENCE_STYLE = {
     "memory_distance": {"label": "Memory", "color": "#EE7875"},
@@ -60,6 +63,17 @@ SUMMARY_METRICS = [
     "Tail@0.99_error",
     "Evidence-Dom-Consistency",
 ]
+
+
+def configure_mode_order(payload: dict[str, Any]) -> list[int]:
+    modes: set[int] = set()
+    for log_key in ("audit_logs", "fault_logs"):
+        logs = payload.get(log_key)
+        if isinstance(logs, dict) and "mode_id" in logs:
+            modes.update(int(value) for value in np.unique(np.asarray(logs["mode_id"])).tolist())
+    if modes:
+        MODE_ORDER[:] = sorted(modes)
+    return list(MODE_ORDER)
 
 
 def parse_args() -> argparse.Namespace:
@@ -252,7 +266,7 @@ def _compute_retrieval_heat(
     payload: dict[str, Any],
     top_k: int = 10,
 ) -> np.ndarray:
-    logs = payload["fault_logs"]
+    logs = payload.get("fault_metric_logs", payload["fault_logs"])
     query_mode = np.asarray(logs["mode_id"], dtype=np.int32)
     neighbor_mode = np.asarray(logs["topk_neighbor_mode_ids"], dtype=np.int32)[:, :top_k]
     heat = np.zeros((len(MODE_ORDER), len(MODE_ORDER)), dtype=np.float64)
@@ -487,7 +501,7 @@ def plot_fault_gap_axes(
     panel_label: str | None = None,
 ) -> None:
     audit_logs = payload["audit_logs"]
-    fault_logs = payload["fault_logs"]
+    fault_logs = payload.get("fault_metric_logs", payload["fault_logs"])
     audit_mode = np.asarray(audit_logs["mode_id"], dtype=np.int32)
     fault_mode = np.asarray(fault_logs["mode_id"], dtype=np.int32)
     audit_memory = np.asarray(audit_logs["memory_distance"], dtype=np.float64)
@@ -618,7 +632,7 @@ def plot_evidence_summary_axes(
     row_labels = []
     for row in summary_rows:
         abbr = evidence_abbr.get(str(row["dominant_evidence"]), "?")
-        row_labels.append(f"d{int(row['fault_id']):02d} · {abbr}")
+        row_labels.append(f"IDV{int(row['fault_id'])} · {abbr}")
     im = ax_heat.imshow(heat, cmap=HEATMAP_CMAP, vmin=0.0, vmax=1.0, aspect="auto")
     ax_heat.set_xticks(
         np.arange(len(EVIDENCE_KEYS)),
@@ -757,7 +771,7 @@ def plot_fault_consistency_axis(
             markeredgewidth=0.6,
             alpha=0.9,
         )
-        end_labels.append((x_idx[-1] + 0.08, y_values[-1], f"d{fault_id:02d}", color))
+        end_labels.append((x_idx[-1] + 0.08, y_values[-1], f"IDV{fault_id}", color))
     ax.set_xticks(x_values, [MODE_STYLE[mode]["label"] for mode in MODE_ORDER])
     ax.set_ylim(0.75, 1.02)
     ax.set_ylabel("Calibrated fault-sequence score")
@@ -919,10 +933,11 @@ def export_overview_panel(
         ]
     )
     fig.suptitle("Mechanism Validation Under Multi-Mode Dynamics", fontsize=14.0, fontweight="bold", y=0.992)
+    protocol_scope = "full six-mode protocol" if len(MODE_ORDER) > 3 else "controlled selected subset"
     fig.text(
         0.5,
         0.968,
-        "TEP controlled subset: SCAR retrieves local normal references that remain mode-compatible, discriminative, and calibrated.",
+        f"TEP {protocol_scope}: SCAR retrieves local normal references that remain mode-compatible, discriminative, and calibrated.",
         ha="center",
         va="center",
         fontsize=9.3,
@@ -942,21 +957,20 @@ def export_overview_panel(
 
 
 def _reference_scatter(ax: plt.Axes, coords: np.ndarray, labels: np.ndarray, title: str) -> None:
-    color_map = {1: "#7EA8F8", 3: "#EE7875", 4: "#A8D39B"}
-    label_map = {1: "Mode 1", 3: "Mode 3", 4: "Mode 4"}
     for mode in MODE_ORDER:
         mask = labels == mode
         points = coords[mask]
         if len(points) == 0:
             continue
+        mode_style = MODE_STYLE[mode]
         ax.scatter(
             points[:, 0],
             points[:, 1],
             s=7,
-            color=color_map[mode],
+            color=mode_style["color"],
             alpha=0.88,
             edgecolors="none",
-            label=label_map[mode],
+            label=mode_style["label"],
         )
     ax.set_title(title, pad=3)
     ax.grid(True)
@@ -1117,6 +1131,7 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     payload = _load_experiment_payload(exp_dir, args.log_subdir)
+    configure_mode_order(payload)
     metrics = _load_metrics(exp_dir, args.log_subdir)
     summary_rows = _build_fault_evidence_summary(payload)
 

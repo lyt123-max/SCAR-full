@@ -21,6 +21,7 @@ fi
 DEVICE="${DEVICE:-cuda}"
 DATA_ROOT="${DATA_ROOT:-./TEP-DATA/TEP_Selected_Data}"
 ARTIFACT_ROOT="${ARTIFACT_ROOT:-./artifacts}"
+TEP_PROTOCOL="${TEP_PROTOCOL:-selected}"
 
 SEQ_LEN="${SEQ_LEN:-128}"
 BATCH_SIZE="${BATCH_SIZE:-128}"
@@ -67,8 +68,11 @@ CORESET_FPS_THRESHOLD="${CORESET_FPS_THRESHOLD:-100000}"
 NUM_WORKERS="${NUM_WORKERS:-2}"
 MAX_TRAIN_WINDOWS="${MAX_TRAIN_WINDOWS:-0}"
 MAX_TEST_WINDOWS="${MAX_TEST_WINDOWS:-0}"
+MAX_TEST_SEQUENCES="${MAX_TEST_SEQUENCES:-0}"
 EVALUATION_SCORE_KEY="${EVALUATION_SCORE_KEY:-cdf_mean}"
 SEED="${SEED:-42}"
+MEMORY_AUDIT_MODE="${MEMORY_AUDIT_MODE:-full}"
+RESOURCE_MONITOR="${RESOURCE_MONITOR:-1}"
 SEQUENCE_SCORE_AGGREGATION="${SEQUENCE_SCORE_AGGREGATION:-p95}"
 
 if [[ "${MAX_TEST_WINDOWS}" != "0" ]]; then
@@ -81,11 +85,17 @@ LOG_DIR="${ARTIFACT_ROOT}/${EXP_NAME}/logs"
 mkdir -p "${LOG_DIR}"
 RUN_LOG_DIR="${LOG_DIR}/${EXP_NAME}"
 mkdir -p "${RUN_LOG_DIR}"
-CHANNELS="$(DATA_ROOT="${DATA_ROOT}" python - <<'PY'
+CHANNELS="$(DATA_ROOT="${DATA_ROOT}" TEP_PROTOCOL="${TEP_PROTOCOL}" python - <<'PY'
 import os
+from coremad.config import CoReMADConfig
 from coremad.data import load_raw_dataset_bundle
 
-bundle = load_raw_dataset_bundle("TEP", os.environ["DATA_ROOT"])
+config = CoReMADConfig(
+    dataset="TEP",
+    data_root=os.environ["DATA_ROOT"],
+    tep_protocol=os.environ["TEP_PROTOCOL"],
+)
+bundle = load_raw_dataset_bundle("TEP", os.environ["DATA_ROOT"], config=config)
 print(bundle.train.shape[1])
 PY
 )"
@@ -93,9 +103,12 @@ PY
 COMMON_ARGS=(
   --dataset TEP
   --data_root "${DATA_ROOT}"
+  --tep_protocol "${TEP_PROTOCOL}"
   --artifact_root "${ARTIFACT_ROOT}"
   --experiment_name "${EXP_NAME}"
   --resume "${RESUME}"
+  --memory_audit_mode "${MEMORY_AUDIT_MODE}"
+  --resource_monitor "${RESOURCE_MONITOR}"
   --seq_len "${SEQ_LEN}"
   --batch_size "${BATCH_SIZE}"
   --train_batch_size "${TRAIN_BATCH_SIZE}"
@@ -137,6 +150,7 @@ COMMON_ARGS=(
   --num_workers "${NUM_WORKERS}"
   --max_train_windows "${MAX_TRAIN_WINDOWS}"
   --max_test_windows "${MAX_TEST_WINDOWS}"
+  --max_test_sequences "${MAX_TEST_SEQUENCES}"
   --evaluation_score_key "${EVALUATION_SCORE_KEY}"
   --sequence_score_aggregation "${SEQUENCE_SCORE_AGGREGATION}"
 )
@@ -147,6 +161,7 @@ print_header() {
   echo "[TEP Script] repo_root=${REPO_ROOT}"
   echo "[TEP Script] stage=${stage_name} exp_name=${EXP_NAME} device=${DEVICE}"
   echo "[TEP Script] data_root=${DATA_ROOT} artifact_root=${ARTIFACT_ROOT}"
+  echo "[TEP Script] tep_protocol=${TEP_PROTOCOL}"
   echo "[TEP Script] resume=${RESUME} log_file=${log_file}"
   echo "[TEP Script] conda_prefix=${CONDA_PREFIX:-<unset>}"
   echo "[TEP Script] d_z=${D_Z} patch_sizes=${PATCH_SIZES} seq_len=${SEQ_LEN}"

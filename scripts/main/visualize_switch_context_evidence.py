@@ -50,8 +50,11 @@ CONTEXT_SCORE_KEYS = [
 ]
 MODE_COLORS = {
     1: "#2F4858",
+    2: "#F26419",
     3: "#F6AE2D",
     4: "#86BBD8",
+    5: "#7D5A50",
+    6: "#758E4F",
 }
 EVIDENCE_COLORS = {
     "Fused CDF-mean": "#2F4858",
@@ -547,7 +550,7 @@ def plot_switch_retrieval_composition(payload: dict[str, Any], radius: int, out_
         ("Near boundary", masks["near"]),
         ("Switch-crossing", masks["crossing"]),
     ]
-    mode_order = [1, 3, 4]
+    mode_order = sorted(int(mode) for mode in np.unique(topk[topk >= 0]).tolist())
     values = np.zeros((len(groups), len(mode_order)), dtype=np.float64)
     for gi, (_, mask) in enumerate(groups):
         modes = topk[mask].reshape(-1)

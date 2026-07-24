@@ -43,6 +43,7 @@ from export_paper_mechanism_figures import (  # noqa: E402
     _save_figure,
     _style_axis,
     configure_paper_style,
+    configure_mode_order,
     copy_metadata_files,
     plot_evidence_summary_axes,
     plot_modewise_exceedance_axis,
@@ -117,7 +118,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output_dir", type=Path, required=True)
     parser.add_argument("--log_subdir", type=str, default="tep_mechanism")
     parser.add_argument("--embedding_method", type=str, default="tsne", choices=["pca", "tsne"])
-    parser.add_argument("--raw_data_dir", type=Path, default=REPO_ROOT / "TEP-DATA" / "TEP_Selected_Data")
+    parser.add_argument("--raw_data_dir", type=Path, default=None)
     parser.add_argument("--top_k", type=int, default=10)
     parser.add_argument("--case_top_k", type=int, default=3)
     parser.add_argument("--num_case_studies", type=int, default=4)
@@ -214,7 +215,18 @@ def _ecdf(values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 def _load_raw_sequence(raw_data_dir: Path, file_id: str, cache: dict[str, np.ndarray]) -> np.ndarray:
     if file_id not in cache:
-        path = raw_data_dir / f"{file_id}.mat"
+        mode_part = file_id.split("d", maxsplit=1)[0]
+        mode_id = int(mode_part[1:])
+        candidates = [
+            raw_data_dir / f"{file_id}.mat",
+            raw_data_dir / f"M{mode_id}" / f"{file_id}.mat",
+        ]
+        path = next((candidate for candidate in candidates if candidate.is_file()), None)
+        if path is None:
+            raise FileNotFoundError(
+                f"Cannot find {file_id}.mat under {raw_data_dir}; "
+                "flat and M1...M6 layouts are supported."
+            )
         payload = loadmat(path)
         cache[file_id] = np.asarray(payload[file_id], dtype=np.float64)
     return cache[file_id]
@@ -893,7 +905,7 @@ def _plot_fault_normal_gap(
         height=0.72,
     )
     ax_fault.axvline(float(np.median(_finite_positive(audit_memory))), color=SOFT_RED, linestyle="--", linewidth=1.0)
-    ax_fault.set_yticks(y_pos, [f"d{row[0]:02d}" for row in fault_rows])
+    ax_fault.set_yticks(y_pos, [f"IDV{row[0]}" for row in fault_rows])
     ax_fault.invert_yaxis()
     ax_fault.set_xlabel("Median distance")
     ax_fault.set_title("Per-fault median distance", loc="left", fontweight="bold")
@@ -1072,7 +1084,7 @@ def _plot_case_studies(
             ax.set_xlim(0, len(x) - 1)
             ax.set_xlabel("Time index within window")
             ax.set_ylabel("Local z-score")
-            ax.set_title(f"Fault d{panel['fault_id']:02d} / Channel {channel_id}", loc="left", fontweight="bold")
+            ax.set_title(f"Fault IDV{panel['fault_id']} / Channel {channel_id}", loc="left", fontweight="bold")
             if row_idx == 0 and col_idx == 0:
                 ax.legend(loc="upper right", frameon=False, fontsize=7.8)
                 _add_panel_label(ax, "A")
@@ -1233,7 +1245,7 @@ def _plot_state_evolution(
     ax_top.plot(x, novelty_pct, color=SOFT_ORANGE, linewidth=1.7, linestyle="--", label="Novelty percentile")
     ax_top.set_ylim(-0.02, 1.02)
     ax_top.set_ylabel("Audit percentile")
-    ax_top.set_title(f"State evolution on {sequence_name} (fault d{fault_id:02d})", loc="left", fontweight="bold")
+    ax_top.set_title(f"State evolution on {sequence_name} (fault IDV{fault_id})", loc="left", fontweight="bold")
     ax_top.legend(loc="upper left", frameon=False, ncol=3)
     mode_strip = np.asarray([MODE_ORDER.index(mode) if mode in MODE_ORDER else np.nan for mode in dominant_retrieved], dtype=np.float64)
     ax_top.scatter(
@@ -1498,6 +1510,12 @@ def main() -> None:
             stale.unlink()
 
     payload = _load_experiment_payload(args.experiment_dir, args.log_subdir)
+    configure_mode_order(payload)
+    if args.raw_data_dir is None:
+        config_payload = json.loads(
+            (args.experiment_dir / "config.json").read_text(encoding="utf-8")
+        )
+        args.raw_data_dir = Path(config_payload["data_root"])
     metrics = _load_metrics(args.experiment_dir, args.log_subdir)
     summary_rows = _build_fault_evidence_summary(payload)
     train_state_meta = load_train_state_meta(args.experiment_dir / args.log_subdir)

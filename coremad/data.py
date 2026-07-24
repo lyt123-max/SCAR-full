@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import csv
+import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 import torch
@@ -164,6 +165,8 @@ class RawDatasetBundle:
     test_sequence_labels: Optional[np.ndarray] = None
     test_sequence_names: Optional[list[str]] = None
     test_sequences: Optional[list[np.ndarray]] = None
+    evaluation_vus_window: Optional[int] = None
+    dataset_metadata: Optional[dict[str, Any]] = None
 
 
 class SlidingWindowDataset(Dataset):
@@ -595,49 +598,342 @@ def _build_detect_dataset_cache(
     return train, test, labels
 
 
-TEP_NORMAL_FILES = ("m1d00.mat", "m3d00.mat", "m4d00.mat")
-TEP_FAULT_FILES = (
-    "m1d01.mat",
-    "m1d04.mat",
-    "m1d06.mat",
-    "m1d07.mat",
-    "m1d10.mat",
-    "m1d13.mat",
-    "m1d14.mat",
-    "m1d27.mat",
-    "m3d01.mat",
-    "m3d04.mat",
-    "m3d06.mat",
-    "m3d07.mat",
-    "m3d10.mat",
-    "m3d13.mat",
-    "m3d14.mat",
-    "m3d27.mat",
-    "m4d01.mat",
-    "m4d04.mat",
-    "m4d06.mat",
-    "m4d07.mat",
-    "m4d10.mat",
-    "m4d13.mat",
-    "m4d14.mat",
-    "m4d27.mat",
+TSB_AD_FILE_PATTERN = re.compile(
+    r"^(?P<index>\d{3})_(?P<source>.+?)_id_(?P<series_id>\d+)_"
+    r"(?P<domain>.+?)_tr_(?P<train_length>\d+)_1st_(?P<first_anomaly>\d+)\.csv$",
+    flags=re.IGNORECASE,
 )
-TEP_NUM_INPUT_CHANNELS = 53
+TSB_AD_CACHE_VERSION = 1
 
 
-def _resolve_tep_root(data_root: str | Path) -> Path:
+def parse_tsb_ad_filename(file_name: str) -> dict[str, Any]:
+    name = Path(str(file_name)).name
+    if not name.casefold().endswith(".csv"):
+        name += ".csv"
+    match = TSB_AD_FILE_PATTERN.fullmatch(name)
+    if match is None:
+        raise ValueError(
+            f"Invalid TSB-AD file name {file_name!r}. Expected "
+            "'NNN_<dataset>_id_<id>_<domain>_tr_<length>_1st_<index>.csv'."
+        )
+    fields = match.groupdict()
+    return {
+        "file_name": name,
+        "file_index": int(fields["index"]),
+        "source_dataset": fields["source"],
+        "series_id": int(fields["series_id"]),
+        "domain": fields["domain"],
+        "train_length": int(fields["train_length"]),
+        "first_anomaly_index": int(fields["first_anomaly"]),
+    }
+
+
+def _resolve_tsb_ad_root(data_root: str | Path) -> Path:
     base = Path(data_root)
     candidates = [
+        base,
+        base / base.name,
+        base / "TSB-AD-M",
+        base / "TSB-AD-U",
+        base / "dataset" / "TSB-AD-M",
+        base / "dataset" / "TSB-AD-U",
+    ]
+    matches: list[Path] = []
+    for candidate in candidates:
+        if not candidate.is_dir():
+            continue
+        if any(TSB_AD_FILE_PATTERN.fullmatch(path.name) for path in candidate.glob("*.csv")):
+            resolved = candidate.resolve()
+            if resolved not in matches:
+                matches.append(resolved)
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        raise FileNotFoundError(
+            f"Cannot find TSB-AD CSV files under {data_root!r}. Expected a TSB-AD-M "
+            "or TSB-AD-U directory containing the official numbered CSV files."
+        )
+    raise ValueError(
+        f"Multiple TSB-AD editions found under {data_root!r}: {matches}. "
+        "Pass the specific TSB-AD-M or TSB-AD-U directory."
+    )
+
+
+def _resolve_tsb_ad_file(dataset: str, tsb_root: Path) -> Path:
+    requested = Path(str(dataset).strip()).name
+    requested_name = requested if requested.casefold().endswith(".csv") else f"{requested}.csv"
+    direct = tsb_root / requested_name
+    if direct.is_file():
+        parse_tsb_ad_filename(direct.name)
+        return direct
+
+    key = requested_name.casefold()
+    matches = [path for path in tsb_root.glob("*.csv") if path.name.casefold() == key]
+    if len(matches) == 1:
+        parse_tsb_ad_filename(matches[0].name)
+        return matches[0]
+    if len(matches) > 1:
+        raise ValueError(f"Ambiguous TSB-AD dataset {dataset!r} under {tsb_root}.")
+    raise FileNotFoundError(
+        f"Cannot find TSB-AD series {dataset!r} under {tsb_root}. "
+        "Pass an exact official CSV file name or file stem."
+    )
+
+
+def _tsb_ad_vus_window(signal: np.ndarray) -> int:
+    """Match TSB-AD's rank-1 ACF window rule without consulting labels."""
+    values = np.asarray(signal, dtype=np.float64).reshape(-1)[:20000]
+    if values.size < 4:
+        return 1
+    values = values - float(values.mean())
+    energy = float(np.dot(values, values))
+    if not np.isfinite(energy) or energy <= 1e-12:
+        return 125
+
+    max_lag = min(400, values.size - 1)
+    fft_size = 1 << (2 * values.size - 1).bit_length()
+    spectrum = np.fft.rfft(values, n=fft_size)
+    acf = np.fft.irfft(spectrum * np.conjugate(spectrum), n=fft_size)[: max_lag + 1]
+    acf = np.real(acf) / max(float(acf[0]), 1e-12)
+    base = 3
+    candidates = acf[base:]
+    if candidates.size < 3:
+        return 125
+    local_maxima = np.flatnonzero(
+        (candidates[1:-1] > candidates[:-2]) & (candidates[1:-1] > candidates[2:])
+    ) + 1
+    if local_maxima.size == 0:
+        return 125
+    best = int(local_maxima[np.argmax(candidates[local_maxima])]) + base
+    return 125 if best > 300 else max(1, best)
+
+
+def _tsb_ad_cache_path(tsb_root: Path, csv_path: Path) -> Path:
+    cache_dir = tsb_root / ".coremad_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir / f"{csv_path.stem}_tsb_ad.npz"
+
+
+def _read_tsb_ad_csv(csv_path: Path, metadata: dict[str, Any]) -> tuple[np.ndarray, np.ndarray, int, int]:
+    with csv_path.open("r", encoding="utf-8", newline="") as handle:
+        header = next(csv.reader(handle), None)
+    if not header or len(header) < 2 or str(header[-1]).strip().casefold() != "label":
+        raise ValueError(f"TSB-AD CSV must end with a Label column: {csv_path}")
+
+    wide = np.loadtxt(csv_path, delimiter=",", skiprows=1, dtype=np.float32, ndmin=2)
+    if wide.ndim != 2 or wide.shape[1] != len(header):
+        raise ValueError(
+            f"Unexpected TSB-AD array shape {wide.shape} for {csv_path}; "
+            f"header declares {len(header)} columns."
+        )
+    finite_rows = np.isfinite(wide).all(axis=1)
+    dropped_rows = int((~finite_rows).sum())
+    if dropped_rows:
+        wide = wide[finite_rows]
+    if wide.shape[0] == 0:
+        raise ValueError(f"No finite rows remain in TSB-AD CSV: {csv_path}")
+
+    data = np.asarray(wide[:, :-1], dtype=np.float32)
+    raw_labels = np.asarray(wide[:, -1], dtype=np.float64)
+    labels = np.rint(raw_labels).astype(np.float32)
+    if not np.allclose(raw_labels, labels, atol=1e-6) or not set(np.unique(labels)).issubset({0.0, 1.0}):
+        raise ValueError(f"TSB-AD labels must be binary in {csv_path}.")
+
+    train_length = int(metadata["train_length"])
+    if train_length <= 0 or train_length >= len(data):
+        raise ValueError(
+            f"Invalid TSB-AD train length {train_length} for {csv_path.name} "
+            f"with {len(data)} finite rows."
+        )
+    if np.any(labels[:train_length] != 0):
+        raise ValueError(
+            f"TSB-AD training prefix contains anomaly labels in {csv_path.name}; "
+            "the semisupervised protocol requires a normal prefix."
+        )
+    positive_indices = np.flatnonzero(labels > 0)
+    first_anomaly = int(metadata["first_anomaly_index"])
+    if positive_indices.size == 0 or int(positive_indices[0]) != first_anomaly:
+        observed = None if positive_indices.size == 0 else int(positive_indices[0])
+        raise ValueError(
+            f"TSB-AD first anomaly mismatch in {csv_path.name}: "
+            f"filename={first_anomaly}, labels={observed}."
+        )
+    vus_window = _tsb_ad_vus_window(data[:, 0])
+    return data, labels, vus_window, dropped_rows
+
+
+def _load_tsb_ad_raw_dataset_bundle(dataset: str, data_root: str | Path) -> RawDatasetBundle:
+    tsb_root = _resolve_tsb_ad_root(data_root)
+    csv_path = _resolve_tsb_ad_file(dataset, tsb_root)
+    metadata = parse_tsb_ad_filename(csv_path.name)
+    cache_path = _tsb_ad_cache_path(tsb_root, csv_path)
+    source_mtime_ns = int(csv_path.stat().st_mtime_ns)
+
+    cache_valid = False
+    if cache_path.exists():
+        try:
+            with np.load(cache_path, allow_pickle=False) as payload:
+                cache_valid = (
+                    int(payload["cache_version"]) == TSB_AD_CACHE_VERSION
+                    and int(payload["source_mtime_ns"]) == source_mtime_ns
+                    and int(payload["train_length"]) == int(metadata["train_length"])
+                )
+                if cache_valid:
+                    full_data = np.asarray(payload["data"], dtype=np.float32)
+                    full_labels = np.asarray(payload["labels"], dtype=np.float32)
+                    vus_window = int(payload["vus_window"])
+                    dropped_rows = int(payload["dropped_rows"])
+        except (KeyError, OSError, ValueError):
+            cache_valid = False
+    if not cache_valid:
+        full_data, full_labels, vus_window, dropped_rows = _read_tsb_ad_csv(csv_path, metadata)
+        np.savez(
+            cache_path,
+            data=full_data,
+            labels=full_labels,
+            cache_version=np.asarray(TSB_AD_CACHE_VERSION, dtype=np.int64),
+            source_mtime_ns=np.asarray(source_mtime_ns, dtype=np.int64),
+            train_length=np.asarray(metadata["train_length"], dtype=np.int64),
+            vus_window=np.asarray(vus_window, dtype=np.int64),
+            dropped_rows=np.asarray(dropped_rows, dtype=np.int64),
+        )
+        print(f"[TSB-AD] Built cache: {cache_path}")
+    else:
+        print(f"[TSB-AD] Loaded cache: {cache_path}")
+
+    train_length = int(metadata["train_length"])
+    train = np.asarray(full_data[:train_length], dtype=np.float32)
+    test = np.asarray(full_data, dtype=np.float32)
+    labels = np.asarray(full_labels, dtype=np.float32)
+    _validate_loaded_arrays(train, test, labels, csv_path.stem)
+
+    edition = "M" if test.shape[1] > 1 else "U"
+    metadata.update(
+        {
+            "edition": edition,
+            "csv_path": str(csv_path.resolve()),
+            "total_length": int(len(test)),
+            "n_channels": int(test.shape[1]),
+            "dropped_nonfinite_rows": int(dropped_rows),
+            "evaluation_scope": "full_series",
+            "normalization_scope": "training_prefix",
+            "vus_window": int(vus_window),
+        }
+    )
+    print(
+        f"[TSB-AD-{edition}] {csv_path.name}: train={len(train)} full_eval={len(test)} "
+        f"channels={test.shape[1]} vus_window={vus_window}"
+    )
+    return RawDatasetBundle(
+        train=train,
+        test=test,
+        test_labels=labels,
+        evaluation_vus_window=vus_window,
+        dataset_metadata=metadata,
+    )
+
+
+TEP_SELECTED_MODES = (1, 3, 4)
+TEP_SELECTED_FILE_FAULT_IDS = (1, 4, 6, 7, 10, 13, 14, 27)
+TEP_FULL_MODES = tuple(range(1, 7))
+TEP_NUM_INPUT_CHANNELS = 53
+TEP_NUM_DISTURBANCES = 28
+
+
+def _tep_file_name(mode_id: int, file_fault_id: int) -> str:
+    return f"m{int(mode_id)}d{int(file_fault_id):02d}.mat"
+
+
+def tep_protocol_files(protocol: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    protocol = str(protocol).strip().lower()
+    if protocol == "selected":
+        modes = TEP_SELECTED_MODES
+        file_fault_ids = TEP_SELECTED_FILE_FAULT_IDS
+    elif protocol == "full":
+        modes = TEP_FULL_MODES
+        file_fault_ids = tuple(range(1, TEP_NUM_DISTURBANCES + 1))
+    else:
+        raise ValueError(f"Unsupported TEP protocol: {protocol!r}.")
+    normal_files = tuple(_tep_file_name(mode_id, 0) for mode_id in modes)
+    fault_files = tuple(
+        _tep_file_name(mode_id, file_fault_id)
+        for mode_id in modes
+        for file_fault_id in file_fault_ids
+    )
+    return normal_files, fault_files
+
+
+TEP_NORMAL_FILES, TEP_FAULT_FILES = tep_protocol_files("selected")
+
+
+def tep_file_fault_to_idv(file_fault_id: int) -> int:
+    """Map the upstream dXX file suffix to the official physical IDV number."""
+    file_fault_id = int(file_fault_id)
+    if file_fault_id == 0:
+        return 0
+    if not 1 <= file_fault_id <= TEP_NUM_DISTURBANCES:
+        raise ValueError(f"TEP file fault id must be in [0, {TEP_NUM_DISTURBANCES}], got {file_fault_id}.")
+    return TEP_NUM_DISTURBANCES + 1 - file_fault_id
+
+
+def tep_idv_to_file_fault(idv: int) -> int:
+    """Map an official physical IDV number to the upstream dXX file suffix."""
+    idv = int(idv)
+    if idv == 0:
+        return 0
+    if not 1 <= idv <= TEP_NUM_DISTURBANCES:
+        raise ValueError(f"TEP IDV must be in [0, {TEP_NUM_DISTURBANCES}], got {idv}.")
+    return TEP_NUM_DISTURBANCES + 1 - idv
+
+
+def _tep_mode_from_file_name(file_name: str) -> int:
+    stem = Path(file_name).stem
+    if not stem.startswith("m") or "d" not in stem:
+        raise ValueError(f"Unsupported TEP file name: {file_name!r}.")
+    return int(stem[1 : stem.index("d")])
+
+
+def _tep_file_fault_from_file_name(file_name: str) -> int:
+    stem = Path(file_name).stem
+    if "d" not in stem:
+        raise ValueError(f"Unsupported TEP file name: {file_name!r}.")
+    return int(stem.split("d", maxsplit=1)[1])
+
+
+def resolve_tep_files(
+    data_root: str | Path,
+    protocol: str = "selected",
+) -> tuple[dict[str, Path], tuple[str, ...], tuple[str, ...]]:
+    base = Path(data_root)
+    roots = [
         base,
         base / "TEP_Selected_Data",
         base / "TEP-DATA" / "TEP_Selected_Data",
     ]
-    for candidate in candidates:
-        if candidate.is_dir() and all((candidate / name).exists() for name in TEP_NORMAL_FILES):
-            return candidate
+    normal_files, fault_files = tep_protocol_files(protocol)
+    resolved: dict[str, Path] = {}
+    missing: list[str] = []
+    for file_name in (*normal_files, *fault_files):
+        mode_id = _tep_mode_from_file_name(file_name)
+        candidates = [
+            candidate
+            for root in roots
+            for candidate in (root / file_name, root / f"M{mode_id}" / file_name)
+        ]
+        match = next((candidate for candidate in candidates if candidate.is_file()), None)
+        if match is None:
+            missing.append(file_name)
+        else:
+            resolved[file_name] = match
+    if not missing:
+        return resolved, normal_files, fault_files
+    preview = ", ".join(missing[:8])
+    if len(missing) > 8:
+        preview += f", ... (+{len(missing) - 8} more)"
     raise FileNotFoundError(
-        f"Cannot find TEP selected-data directory under {data_root!r}. "
-        "Expected a directory containing files like m1d00.mat and m3d00.mat."
+        f"Cannot resolve TEP protocol={protocol!r} under {data_root!r}; "
+        f"missing {len(missing)} files: {preview}. "
+        "Both flat files and M1...M6 subdirectories are supported."
     )
 
 
@@ -689,8 +985,18 @@ def _split_tep_normal_segment(
     return train_seg, val_seg
 
 
+def _validate_tep_fault_length(num_rows: int, seq_len: int, file_name: str) -> None:
+    if int(num_rows) < int(seq_len):
+        raise ValueError(
+            f"TEP fault file {file_name} has {int(num_rows)} rows, shorter than seq_len={int(seq_len)}."
+        )
+
+
 def _load_tep_raw_dataset_bundle(config: CoReMADConfig) -> RawDatasetBundle:
-    root = _resolve_tep_root(config.data_root)
+    file_paths, normal_files, fault_files = resolve_tep_files(
+        config.data_root,
+        protocol=config.tep_protocol,
+    )
     normal_train_segments: list[np.ndarray] = []
     normal_val_segments: list[np.ndarray] = []
     train_segment_names: list[str] = []
@@ -698,9 +1004,11 @@ def _load_tep_raw_dataset_bundle(config: CoReMADConfig) -> RawDatasetBundle:
     test_sequences: list[np.ndarray] = []
     test_sequence_labels: list[int] = []
     test_sequence_names: list[str] = []
+    sequence_lengths: dict[str, int] = {}
 
-    for file_name in TEP_NORMAL_FILES:
-        arr = _load_tep_mat(root / file_name)
+    for file_name in normal_files:
+        arr = _load_tep_mat(file_paths[file_name])
+        sequence_lengths[Path(file_name).stem] = int(len(arr))
         train_seg, val_seg = _split_tep_normal_segment(
             arr,
             seq_len=config.seq_len,
@@ -714,8 +1022,10 @@ def _load_tep_raw_dataset_bundle(config: CoReMADConfig) -> RawDatasetBundle:
         train_segment_names.append(file_name[:-4])
         val_segment_names.append(file_name[:-4] + "_val")
 
-    for file_name in TEP_FAULT_FILES:
-        arr = _load_tep_mat(root / file_name)
+    for file_name in fault_files:
+        arr = _load_tep_mat(file_paths[file_name])
+        _validate_tep_fault_length(len(arr), config.seq_len, file_name)
+        sequence_lengths[Path(file_name).stem] = int(len(arr))
         test_sequences.append(arr)
         test_sequence_labels.append(1)
         test_sequence_names.append(file_name[:-4])
@@ -725,8 +1035,26 @@ def _load_tep_raw_dataset_bundle(config: CoReMADConfig) -> RawDatasetBundle:
     test = _empty_feature_array(train.shape[1])
     test_labels = np.empty(0, dtype=np.float32)
     _validate_loaded_arrays(train, test, test_labels, "TEP")
+    mode_ids = sorted({_tep_mode_from_file_name(name) for name in normal_files})
+    file_fault_ids = sorted({_tep_file_fault_from_file_name(name) for name in fault_files})
+    fault_lengths = [sequence_lengths[Path(name).stem] for name in fault_files]
+    metadata = {
+        "tep_protocol": str(config.tep_protocol),
+        "mode_ids": mode_ids,
+        "file_fault_ids": file_fault_ids,
+        "official_idv_ids": sorted(tep_file_fault_to_idv(value) for value in file_fault_ids),
+        "normal_files": [Path(name).stem for name in normal_files],
+        "fault_files": [Path(name).stem for name in fault_files],
+        "sequence_lengths": sequence_lengths,
+        "n_normal_sequences": len(normal_files),
+        "n_fault_sequences": len(fault_files),
+        "n_full_length_fault_sequences": int(sum(length == 7201 for length in fault_lengths)),
+        "n_short_fault_sequences": int(sum(length < 7201 for length in fault_lengths)),
+        "official_fault_mapping": "IDV = 29 - d for d01...d28",
+    }
     print(
-        f"[TEP] loaded root={root} train={train.shape} val={val.shape} "
+        f"[TEP] loaded root={config.data_root} protocol={config.tep_protocol} "
+        f"train={train.shape} val={val.shape} "
         f"sequence_eval_only=True n_test_sequences={len(test_sequence_labels)}"
     )
     return RawDatasetBundle(
@@ -741,6 +1069,7 @@ def _load_tep_raw_dataset_bundle(config: CoReMADConfig) -> RawDatasetBundle:
         test_sequence_labels=np.asarray(test_sequence_labels, dtype=np.int32),
         test_sequence_names=list(test_sequence_names),
         test_sequences=[np.asarray(segment, dtype=np.float32) for segment in test_sequences],
+        dataset_metadata=metadata,
     )
 
 
@@ -768,9 +1097,14 @@ def load_raw_dataset_bundle(
     config: Optional[CoReMADConfig] = None,
 ) -> RawDatasetBundle:
     dataset_key = str(dataset).strip().upper()
-    if dataset_key == "TEP":
+    data_format = str(config.data_format if config is not None else "auto").strip().lower()
+    if data_format == "tsb_ad":
+        return _load_tsb_ad_raw_dataset_bundle(dataset, data_root)
+    if data_format == "tep" or (data_format == "auto" and dataset_key == "TEP"):
         tep_config = config or CoReMADConfig(dataset="TEP", data_root=str(data_root))
         return _load_tep_raw_dataset_bundle(tep_config)
+    if data_format not in {"auto", "detect"}:
+        raise ValueError(f"Unsupported data_format={data_format!r} for dataset {dataset!r}.")
     train, test, labels = load_raw_dataset(dataset, data_root)
     return RawDatasetBundle(train=train, test=test, test_labels=labels)
 

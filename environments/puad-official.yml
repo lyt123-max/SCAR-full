@@ -1,0 +1,19 @@
+name: puad-official
+channels:
+  - pytorch
+  - conda-forge
+dependencies:
+  - python=3.8
+  - pytorch=1.9.1
+  - torchvision=0.10.1
+  - cudatoolkit=11.1
+  - numpy=1.22.3
+  - pandas=1.4.1
+  - scipy=1.7.1
+  - scikit-learn=1.2.0
+  - matplotlib=3.5.1
+  - tqdm=4.62.3
+  - psutil
+  - pip
+  - pip:
+      - pynvml

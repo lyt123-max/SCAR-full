@@ -10,9 +10,36 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--stage", type=str, default="full", choices=["stage_a", "stage_b", "test", "full"])
     parser.add_argument("--dataset", type=str, default="MSL")
     parser.add_argument("--data_root", type=str, default="./dataset/anomaly_detect")
+    parser.add_argument(
+        "--data_format",
+        type=str,
+        default="auto",
+        choices=["auto", "detect", "tep", "tsb_ad"],
+        help="Dataset protocol. Use tsb_ad for a single TSB-AD CSV file.",
+    )
+    parser.add_argument(
+        "--tep_protocol",
+        type=str,
+        default="selected",
+        choices=["selected", "full"],
+        help="TEP subset protocol. The full protocol uses M1-M6 and d01-d28.",
+    )
     parser.add_argument("--artifact_root", type=str, default="./artifacts")
     parser.add_argument("--experiment_name", type=str, default="coremad_msl")
     parser.add_argument("--resume", type=int, default=0)
+    parser.add_argument(
+        "--resource_monitor",
+        type=int,
+        default=1,
+        choices=[0, 1],
+        help="Enable per-stage resource monitoring and resource_metrics.json output.",
+    )
+    parser.add_argument(
+        "--resource_sample_interval",
+        type=float,
+        default=0.1,
+        help="Resource sampling interval in seconds.",
+    )
     parser.add_argument("--seq_len", type=int, default=128)
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--train_batch_size", type=int, default=None)
@@ -40,6 +67,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--scheduler_eta_min_ratio", type=float, default=0.01)
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--memory_seed",
+        type=int,
+        default=None,
+        help="Stage-B prototype/coreset seed. Defaults to --seed.",
+    )
+    parser.add_argument(
+        "--memory_audit_mode",
+        type=str,
+        default="none",
+        choices=["none", "summary", "full"],
+        help="Memory-build audit output. Full mode writes per-patch compressed NPZ files.",
+    )
     parser.add_argument("--patch_sizes", type=int, nargs="+", default=[8, 32])
     parser.add_argument("--d_z", type=int, default=128)
     parser.add_argument("--top_M", type=int, default=50)
@@ -64,6 +104,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num_workers", type=int, default=8)
     parser.add_argument("--max_train_windows", type=int, default=0)
     parser.add_argument("--max_test_windows", type=int, default=0)
+    parser.add_argument("--max_test_sequences", type=int, default=0)
     parser.add_argument(
         "--sequence_score_aggregation",
         type=str,
@@ -104,9 +145,13 @@ def main() -> None:
     config = CoReMADConfig(
         dataset=args.dataset,
         data_root=args.data_root,
+        data_format=args.data_format,
+        tep_protocol=args.tep_protocol,
         artifact_root=args.artifact_root,
         experiment_name=args.experiment_name,
         resume=bool(args.resume),
+        resource_monitor_enabled=bool(args.resource_monitor),
+        resource_sample_interval=args.resource_sample_interval,
         seq_len=args.seq_len,
         batch_size=train_batch_size,
         train_batch_size=train_batch_size,
@@ -163,9 +208,12 @@ def main() -> None:
         num_workers=args.num_workers,
         max_train_windows=args.max_train_windows,
         max_test_windows=args.max_test_windows,
+        max_test_sequences=args.max_test_sequences,
         sequence_score_aggregation=args.sequence_score_aggregation,
         device=args.device or CoReMADConfig().device,
         seed=args.seed,
+        memory_seed=args.memory_seed,
+        memory_audit_mode=args.memory_audit_mode,
     )
     trainer = CoReMADTrainer(config)
 

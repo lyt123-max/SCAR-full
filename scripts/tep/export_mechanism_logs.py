@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -55,6 +56,13 @@ def parse_args() -> argparse.Namespace:
         choices=["p95", "top5_mean", "max", "mean"],
     )
     parser.add_argument("--top_k", type=int, default=0, help="Defaults to config.top_K.")
+    parser.add_argument("--resume", action="store_true", help="Reuse valid per-sequence shards.")
+    parser.add_argument(
+        "--detail_windows_per_sequence",
+        type=int,
+        default=256,
+        help="Maximum evenly sampled windows kept with state vectors for visualization.",
+    )
     return parser.parse_args()
 
 
@@ -75,6 +83,7 @@ def _build_sequence_records(sequence_scores_npz: Path) -> list[dict[str, object]
             "coverage_ratio": float(coverage_ratio[idx]) if idx < len(coverage_ratio) else float("nan"),
             "mode_id": int(meta["mode_id"]),
             "fault_id": int(meta["fault_id"]),
+            "file_fault_id": int(meta["file_fault_id"]),
             "is_normal": int(meta["is_normal"]),
             "file_id": str(meta["file_id"]),
         }
@@ -98,6 +107,7 @@ def _save_window_records(output_dir: Path, prefix: str, records: list[dict[str, 
         "sequence_name": np.asarray([record["sequence_name"] for record in records], dtype=object),
         "is_normal": np.asarray([record["is_normal"] for record in records], dtype=np.int32),
         "fault_id": np.asarray([record["fault_id"] for record in records], dtype=np.int32),
+        "file_fault_id": np.asarray([record["file_fault_id"] for record in records], dtype=np.int32),
         "state_vec": np.stack([np.asarray(record["state_vec"], dtype=np.float32) for record in records], axis=0),
         "topk_neighbor_window_ids": np.stack(
             [np.asarray(record["topk_neighbor_window_ids"], dtype=np.int64) for record in records],
@@ -129,6 +139,7 @@ def _save_window_records(output_dir: Path, prefix: str, records: list[dict[str, 
         "sequence_name",
         "is_normal",
         "fault_id",
+        "file_fault_id",
         *WINDOW_SCORE_KEYS,
         "state_vec",
         "topk_neighbor_window_ids",
@@ -148,6 +159,137 @@ def _save_window_records(output_dir: Path, prefix: str, records: list[dict[str, 
             writer.writerow(row)
     print(f"[TEP Export] wrote {prefix} npz: {output_dir / f'{prefix}.npz'}")
     print(f"[TEP Export] wrote {prefix} csv: {csv_path}")
+
+
+def _save_npz_atomic(path: Path, payload: dict[str, np.ndarray]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_suffix(path.suffix + ".part")
+    with temp_path.open("wb") as handle:
+        np.savez_compressed(handle, **payload)
+    temp_path.replace(path)
+
+
+def _fault_metric_payload(
+    records: list[dict[str, object]],
+    sequence_name: str,
+    signature: str,
+) -> dict[str, np.ndarray]:
+    payload: dict[str, np.ndarray] = {
+        "schema_version": np.asarray(3, dtype=np.int32),
+        "signature": np.asarray(signature),
+        "sequence_name": np.asarray(sequence_name),
+        "start": np.asarray([record["start"] for record in records], dtype=np.int32),
+        "mode_id": np.asarray([record["mode_id"] for record in records], dtype=np.int8),
+        "fault_id": np.asarray([record["fault_id"] for record in records], dtype=np.int8),
+        "file_fault_id": np.asarray([record["file_fault_id"] for record in records], dtype=np.int8),
+        "topk_neighbor_mode_ids": np.stack(
+            [np.asarray(record["topk_neighbor_mode_ids"], dtype=np.int8) for record in records],
+            axis=0,
+        ),
+        "topk_neighbor_distances": np.stack(
+            [np.asarray(record["topk_neighbor_distances"], dtype=np.float32) for record in records],
+            axis=0,
+        ),
+    }
+    for score_key in WINDOW_SCORE_KEYS:
+        payload[score_key] = np.asarray(
+            [record[score_key] for record in records],
+            dtype=np.float32,
+        )
+    return payload
+
+
+def _fault_detail_payload(
+    records: list[dict[str, object]],
+    sequence_name: str,
+    signature: str,
+    max_windows: int,
+) -> dict[str, np.ndarray]:
+    n_records = len(records)
+    n_keep = min(max(1, int(max_windows)), n_records)
+    indices = np.unique(np.linspace(0, n_records - 1, num=n_keep, dtype=np.int64))
+    selected = [records[int(idx)] for idx in indices.tolist()]
+    payload: dict[str, np.ndarray] = {
+        "schema_version": np.asarray(3, dtype=np.int32),
+        "signature": np.asarray(signature),
+        "sequence_name_scalar": np.asarray(sequence_name),
+        "window_index": np.asarray([record["window_index"] for record in selected], dtype=np.int64),
+        "start": np.asarray([record["start"] for record in selected], dtype=np.int32),
+        "mode_id": np.asarray([record["mode_id"] for record in selected], dtype=np.int8),
+        "file_id": np.asarray([record["file_id"] for record in selected], dtype=object),
+        "sequence_name": np.asarray([record["sequence_name"] for record in selected], dtype=object),
+        "is_normal": np.asarray([record["is_normal"] for record in selected], dtype=np.int8),
+        "fault_id": np.asarray([record["fault_id"] for record in selected], dtype=np.int8),
+        "file_fault_id": np.asarray([record["file_fault_id"] for record in selected], dtype=np.int8),
+        "state_vec": np.stack(
+            [np.asarray(record["state_vec"], dtype=np.float32) for record in selected],
+            axis=0,
+        ),
+        "topk_neighbor_window_ids": np.stack(
+            [np.asarray(record["topk_neighbor_window_ids"], dtype=np.int32) for record in selected],
+            axis=0,
+        ),
+        "topk_neighbor_mode_ids": np.stack(
+            [np.asarray(record["topk_neighbor_mode_ids"], dtype=np.int8) for record in selected],
+            axis=0,
+        ),
+        "topk_neighbor_file_ids": np.stack(
+            [np.asarray(record["topk_neighbor_file_ids"], dtype=object) for record in selected],
+            axis=0,
+        ),
+        "topk_neighbor_distances": np.stack(
+            [np.asarray(record["topk_neighbor_distances"], dtype=np.float32) for record in selected],
+            axis=0,
+        ),
+    }
+    for score_key in WINDOW_SCORE_KEYS:
+        payload[score_key] = np.asarray(
+            [record[score_key] for record in selected],
+            dtype=np.float32,
+        )
+    return payload
+
+
+def _valid_fault_shard(path: Path, signature: str, sequence_name: str) -> tuple[bool, int]:
+    if not path.exists():
+        return False, 0
+    try:
+        payload = np.load(path, allow_pickle=False)
+        stored_name = (
+            str(np.asarray(payload["sequence_name_scalar"]).item())
+            if "sequence_name_scalar" in payload.files
+            else str(np.asarray(payload["sequence_name"]).item())
+        )
+        valid = (
+            int(np.asarray(payload["schema_version"]).item()) == 3
+            and str(np.asarray(payload["signature"]).item()) == signature
+            and stored_name == sequence_name
+        )
+        return valid, int(len(payload["start"])) if valid else 0
+    except Exception:
+        return False, 0
+
+
+def _merge_detail_shards(paths: list[Path], output_path: Path) -> int:
+    payloads = [np.load(path, allow_pickle=True) for path in paths]
+    if not payloads:
+        return 0
+    try:
+        array_keys = [
+            key
+            for key in payloads[0].files
+            if key not in {"schema_version", "signature", "sequence_name_scalar"}
+        ]
+        merged = {
+            key: np.concatenate([np.asarray(payload[key]) for payload in payloads], axis=0)
+            for key in array_keys
+        }
+        merged["schema_version"] = np.asarray(3, dtype=np.int32)
+        _save_npz_atomic(output_path, merged)
+        return int(len(merged["start"]))
+    finally:
+        for payload in payloads:
+            payload.close()
 
 
 def _collect_window_records(
@@ -228,6 +370,7 @@ def _collect_window_records(
                     "sequence_name": str(meta["sequence_name"]),
                     "is_normal": int(meta["is_normal"]),
                     "fault_id": int(meta["fault_id"]),
+                    "file_fault_id": int(meta["file_fault_id"]),
                     "state_vec": encoded["state_vec"][row_idx].detach().cpu().numpy().astype(np.float32),
                     "memory_distance": aggregate_point_scores(point_diags["knn_distance"][row_idx], window_aggregation),
                     "soft_support_score": aggregate_point_scores(
@@ -349,6 +492,7 @@ def main() -> None:
             "sequence_name": str(audit_meta["name"][audit_meta_lookup[start]]),
             "is_normal": int(audit_meta["is_normal"][audit_meta_lookup[start]]),
             "fault_id": int(audit_meta["fault_id"][audit_meta_lookup[start]]),
+            "file_fault_id": int(audit_meta["file_fault_id"][audit_meta_lookup[start]]),
         },
         train_meta=train_meta,
         window_aggregation=args.window_aggregation,
@@ -357,43 +501,194 @@ def main() -> None:
     )
     _save_window_records(output_dir, "audit_normal_window_logs", audit_records)
 
-    fault_records: list[dict[str, object]] = []
-    for sequence_name, sequence_data in zip(raw_bundle.test_sequence_names, raw_bundle.test_sequences):
-        seq_meta = parse_tep_name(str(sequence_name))
-        seq_norm = normalizer.transform(np.asarray(sequence_data, dtype=np.float32))
-        seq_loader = build_loader(
-            data=seq_norm,
-            labels=None,
-            seq_len=config.seq_len,
-            stride=config.test_stride,
-            batch_size=config.test_batch_size,
-            num_workers=config.num_workers,
-            shuffle=False,
-            max_windows=0,
-            drop_last=False,
-            segment_ranges=None,
+    use_sharded_fault_logs = str(config.tep_protocol).lower() == "full"
+    n_fault_windows = 0
+    if use_sharded_fault_logs:
+        metric_shard_dir = output_dir / "fault_window_shards"
+        detail_shard_dir = output_dir / "fault_detail_shards"
+        metric_shard_dir.mkdir(parents=True, exist_ok=True)
+        detail_shard_dir.mkdir(parents=True, exist_ok=True)
+        signature_payload = {
+            "schema_version": 3,
+            "dataset": str(config.dataset),
+            "data_root": str(Path(config.data_root).resolve()),
+            "tep_protocol": str(config.tep_protocol),
+            "seq_len": int(config.seq_len),
+            "test_stride": int(config.test_stride),
+            "window_aggregation": str(args.window_aggregation),
+            "top_k": int(top_k),
+            "detail_windows_per_sequence": int(args.detail_windows_per_sequence),
+            "stage_a": trainer._file_signature(config.stage_a_path),
+            "memory": trainer._file_signature(config.memory_path),
+            "cdf_npz": trainer._file_signature(config.cdf_fusion_path.with_suffix(".npz")),
+            "cdf_json": trainer._file_signature(config.cdf_fusion_path.with_suffix(".json")),
+            "zscore_json": trainer._file_signature(config.zscore_fusion_path.with_suffix(".json")),
+            "tep_data_files": trainer._tep_data_file_signatures(),
+        }
+        shard_signature = hashlib.sha256(
+            json.dumps(signature_payload, sort_keys=True, ensure_ascii=True).encode("utf-8")
+        ).hexdigest()
+        shard_rows: list[dict[str, object]] = []
+        detail_paths: list[Path] = []
+        for sequence_name, sequence_data in zip(
+            raw_bundle.test_sequence_names,
+            raw_bundle.test_sequences,
+        ):
+            sequence_name = str(sequence_name)
+            metric_path = metric_shard_dir / f"{Path(sequence_name).stem}.npz"
+            detail_path = detail_shard_dir / f"{Path(sequence_name).stem}.npz"
+            metric_valid, metric_count = _valid_fault_shard(
+                metric_path,
+                shard_signature,
+                sequence_name,
+            )
+            detail_valid, _ = _valid_fault_shard(
+                detail_path,
+                shard_signature,
+                sequence_name,
+            )
+            if args.resume and metric_valid and detail_valid:
+                print(
+                    f"[TEP Export] resume fault shard sequence={sequence_name} "
+                    f"windows={metric_count}"
+                )
+                n_fault_windows += metric_count
+                shard_rows.append(
+                    {
+                        "sequence_name": sequence_name,
+                        "windows": metric_count,
+                        "metric_file": metric_path.name,
+                        "detail_file": detail_path.name,
+                    }
+                )
+                detail_paths.append(detail_path)
+                continue
+
+            seq_meta = parse_tep_name(sequence_name)
+            seq_norm = normalizer.transform(np.asarray(sequence_data, dtype=np.float32))
+            seq_loader = build_loader(
+                data=seq_norm,
+                labels=None,
+                seq_len=config.seq_len,
+                stride=config.test_stride,
+                batch_size=config.test_batch_size,
+                num_workers=config.num_workers,
+                shuffle=False,
+                max_windows=0,
+                drop_last=False,
+                segment_ranges=None,
+            )
+            seq_records = _collect_window_records(
+                trainer=trainer,
+                model=model,
+                memory=memory,
+                cdf_fusion=cdf_fusion,
+                zscore_fusion=zscore_fusion,
+                loader=seq_loader,
+                metadata_for_start=lambda start, meta=seq_meta: {
+                    "mode_id": int(meta["mode_id"]),
+                    "file_id": str(meta["file_id"]),
+                    "sequence_name": str(meta["name"]),
+                    "is_normal": int(meta["is_normal"]),
+                    "fault_id": int(meta["fault_id"]),
+                    "file_fault_id": int(meta["file_fault_id"]),
+                },
+                train_meta=train_meta,
+                window_aggregation=args.window_aggregation,
+                top_k=top_k,
+                record_offset=0,
+            )
+            if not seq_records:
+                raise RuntimeError(f"No mechanism windows exported for {sequence_name}.")
+            _save_npz_atomic(
+                metric_path,
+                _fault_metric_payload(seq_records, sequence_name, shard_signature),
+            )
+            _save_npz_atomic(
+                detail_path,
+                _fault_detail_payload(
+                    seq_records,
+                    sequence_name,
+                    shard_signature,
+                    args.detail_windows_per_sequence,
+                ),
+            )
+            n_windows = len(seq_records)
+            n_fault_windows += n_windows
+            shard_rows.append(
+                {
+                    "sequence_name": sequence_name,
+                    "windows": n_windows,
+                    "metric_file": metric_path.name,
+                    "detail_file": detail_path.name,
+                }
+            )
+            detail_paths.append(detail_path)
+            print(f"[TEP Export] wrote fault shards sequence={sequence_name} windows={n_windows}")
+
+        n_detail_windows = _merge_detail_shards(
+            detail_paths,
+            output_dir / "fault_detail_sample.npz",
         )
-        seq_records = _collect_window_records(
-            trainer=trainer,
-            model=model,
-            memory=memory,
-            cdf_fusion=cdf_fusion,
-            zscore_fusion=zscore_fusion,
-            loader=seq_loader,
-            metadata_for_start=lambda start, meta=seq_meta: {
-                "mode_id": int(meta["mode_id"]),
-                "file_id": str(meta["file_id"]),
-                "sequence_name": str(meta["name"]),
-                "is_normal": int(meta["is_normal"]),
-                "fault_id": int(meta["fault_id"]),
-            },
-            train_meta=train_meta,
-            window_aggregation=args.window_aggregation,
-            top_k=top_k,
-            record_offset=len(fault_records),
+        shard_manifest = {
+            "schema_version": 3,
+            "signature": shard_signature,
+            "signature_payload": signature_payload,
+            "storage": "per_sequence_shards",
+            "n_fault_sequences": len(shard_rows),
+            "n_fault_windows": n_fault_windows,
+            "n_detail_windows": n_detail_windows,
+            "metric_shard_dir": metric_shard_dir.name,
+            "detail_shard_dir": detail_shard_dir.name,
+            "sequences": shard_rows,
+        }
+        (output_dir / "fault_window_shards_manifest.json").write_text(
+            json.dumps(shard_manifest, indent=2, ensure_ascii=False),
+            encoding="utf-8",
         )
-        fault_records.extend(seq_records)
-    _save_window_records(output_dir, "fault_window_logs", fault_records)
+    else:
+        fault_records: list[dict[str, object]] = []
+        for sequence_name, sequence_data in zip(
+            raw_bundle.test_sequence_names,
+            raw_bundle.test_sequences,
+        ):
+            seq_meta = parse_tep_name(str(sequence_name))
+            seq_norm = normalizer.transform(np.asarray(sequence_data, dtype=np.float32))
+            seq_loader = build_loader(
+                data=seq_norm,
+                labels=None,
+                seq_len=config.seq_len,
+                stride=config.test_stride,
+                batch_size=config.test_batch_size,
+                num_workers=config.num_workers,
+                shuffle=False,
+                max_windows=0,
+                drop_last=False,
+                segment_ranges=None,
+            )
+            seq_records = _collect_window_records(
+                trainer=trainer,
+                model=model,
+                memory=memory,
+                cdf_fusion=cdf_fusion,
+                zscore_fusion=zscore_fusion,
+                loader=seq_loader,
+                metadata_for_start=lambda start, meta=seq_meta: {
+                    "mode_id": int(meta["mode_id"]),
+                    "file_id": str(meta["file_id"]),
+                    "sequence_name": str(meta["name"]),
+                    "is_normal": int(meta["is_normal"]),
+                    "fault_id": int(meta["fault_id"]),
+                    "file_fault_id": int(meta["file_fault_id"]),
+                },
+                train_meta=train_meta,
+                window_aggregation=args.window_aggregation,
+                top_k=top_k,
+                record_offset=len(fault_records),
+            )
+            fault_records.extend(seq_records)
+        _save_window_records(output_dir, "fault_window_logs", fault_records)
+        n_fault_windows = len(fault_records)
 
     fault_sequence_records = _build_sequence_records(args.experiment_dir / "test_sequence_scores.npz")
     (output_dir / "fault_sequence_scores_with_meta.json").write_text(
@@ -413,10 +708,13 @@ def main() -> None:
         "top_k": top_k,
         "n_train_state_windows": len(train_starts),
         "n_audit_normal_windows": len(audit_records),
-        "n_fault_windows": len(fault_records),
+        "n_fault_windows": n_fault_windows,
         "n_fault_sequences": len(fault_sequence_records),
         "score_key": str(config.evaluation_score_key),
-        "schema_version": 2,
+        "schema_version": 3 if use_sharded_fault_logs else 2,
+        "fault_log_storage": (
+            "per_sequence_shards" if use_sharded_fault_logs else "monolithic_npz_csv"
+        ),
     }
     (output_dir / "export_meta.json").write_text(
         json.dumps(meta, indent=2, ensure_ascii=False),

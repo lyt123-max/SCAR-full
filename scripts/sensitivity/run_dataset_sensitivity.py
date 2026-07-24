@@ -54,6 +54,8 @@ STAGE_B_COMPAT_FIELDS = (
     "coreset_max_patches_per_scale",
     "coreset_fps_threshold",
     "seed",
+    "memory_seed",
+    "memory_audit_mode",
 )
 
 
@@ -107,6 +109,9 @@ COMMON_DEFAULT_ARGS: dict[str, Any] = {
     "max_train_windows": 0,
     "max_test_windows": 0,
     "seed": 42,
+    "memory_seed": 42,
+    "memory_audit_mode": "full",
+    "resource_monitor": 1,
     "resume": 1,
 }
 
@@ -114,13 +119,23 @@ COMMON_DEFAULT_ARGS: dict[str, Any] = {
 DATASET_OVERRIDES: dict[str, dict[str, Any]] = {
     "GECCO": {"dataset": "GECCO"},
     "GENESIS": {"dataset": "GENESIS"},
-    # MSL sweeps are expected to reuse the historical 256-batch Stage-A baseline.
-    "MSL": {"dataset": "MSL", "batch_size": 256},
+    "MSL": {"dataset": "MSL"},
     "SMAP": {"dataset": "SMAP"},
     "PSM": {"dataset": "PSM", "val_split_mode": "interleaved", "lr": 5e-4},
-    "SWAT": {"dataset": "SWAT"},
-    # SMD sweeps also reuse the historical 256-batch Stage-A baseline.
-    "SMD": {"dataset": "SMD", "batch_size": 256},
+    "SWAT": {
+        "dataset": "SWAT",
+        "memory_build_stride": 2,
+        "early_stop_patience": 10,
+        "lr": 1e-3,
+        "completion_dropout": 0.2,
+    },
+    "SMD": {
+        "dataset": "SMD",
+        "memory_build_stride": 4,
+        "val_split_mode": "interleaved",
+        "early_stop_patience": 6,
+        "lr": 1e-3,
+    },
 }
 
 
@@ -199,6 +214,28 @@ SWEEP_SPECS: dict[str, SweepSpec] = {
         paper_panel="appendix",
         value_labels=("50k", "100k", "200k", "500k", "uncapped"),
     ),
+    "coreset_keep_ratio": SweepSpec(
+        name="coreset_keep_ratio",
+        cli_key="coreset_keep_ratio",
+        values=(1.0, 0.5, 0.25, 0.10, 0.05),
+        default=1.0,
+        group="memory",
+        stage_mode="reuse_stage_a",
+        description="Fraction of purified memory patches retained by the coreset.",
+        paper_panel="memory_keep",
+        value_labels=("100pct", "50pct", "25pct", "10pct", "5pct"),
+    ),
+    "clean_ratio": SweepSpec(
+        name="clean_ratio",
+        cli_key="clean_ratio",
+        values=(0.0, 0.005, 0.01, 0.02, 0.05, 0.10),
+        default=0.02,
+        group="memory",
+        stage_mode="reuse_stage_a",
+        description="Fraction removed by completion-based memory purification.",
+        paper_panel="purification",
+        value_labels=("0", "0p5pct", "1pct", "2pct", "5pct", "10pct"),
+    ),
 }
 
 
@@ -212,10 +249,12 @@ PRESETS: dict[str, tuple[str, ...]] = {
         "seq_len",
         "mask_ratio",
         "coreset_max_patches_per_scale",
+        "coreset_keep_ratio",
+        "clean_ratio",
     ),
     "retrieval": ("top_M", "top_K", "knn_k"),
     "representation": ("d_z", "seq_len", "mask_ratio"),
-    "memory": ("coreset_max_patches_per_scale",),
+    "memory": ("clean_ratio", "coreset_keep_ratio", "coreset_max_patches_per_scale"),
 }
 
 
@@ -260,6 +299,15 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default=None,
         help="Experiment name for the reusable default Stage-A checkpoint.",
+    )
+    parser.add_argument(
+        "--base-experiment-dir",
+        type=Path,
+        default=None,
+        help=(
+            "Exact reusable Stage-A experiment directory. Formal rebuttal sweeps should "
+            "use this option instead of resolving a name under the sweep artifact root."
+        ),
     )
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--python-exe", type=str, default=sys.executable)
@@ -506,15 +554,6 @@ def run_command(command: list[str], log_path: Path, dry_run: bool) -> None:
         raise RuntimeError(f"Command failed with exit code {return_code}: {' '.join(command)}")
 
 
-def reset_experiment_dir(exp_dir: Path, dry_run: bool, reason: str) -> None:
-    if not exp_dir.exists():
-        return
-    print(f"[Sensitivity] reset experiment dir: {exp_dir} ({reason})")
-    if dry_run:
-        return
-    shutil.rmtree(exp_dir)
-
-
 def _values_match(expected: Any, actual: Any) -> bool:
     if isinstance(expected, list):
         return isinstance(actual, list) and len(expected) == len(actual) and all(
@@ -687,7 +726,10 @@ def ensure_stage_a_seed(
         return base_dir
 
     if base_dir.exists():
-        reset_experiment_dir(base_dir, dry_run, reason)
+        raise RuntimeError(
+            f"Refusing to replace incompatible Stage-A baseline {base_dir}: {reason}. "
+            "Choose a new --base-exp-name or pass the exact --base-experiment-dir."
+        )
 
     print(f"[Sensitivity] building Stage-A baseline: {base_dir}")
     command = build_run_command(python_exe, artifact_root, data_root, device, "stage_a", base_exp_name, default_args, {})
@@ -875,15 +917,24 @@ def main() -> None:
     )
     base_dir: Path | None = None
     if needs_stage_a_reuse:
-        base_dir = ensure_stage_a_seed(
-            args.python_exe,
-            artifact_root,
-            args.data_root,
-            args.device,
-            default_args,
-            base_exp_name,
-            args.dry_run,
-        )
+        if args.base_experiment_dir is not None:
+            base_dir = args.base_experiment_dir.resolve()
+            reusable, reason = validate_stage_a_seed(base_dir, default_args)
+            if not reusable:
+                raise RuntimeError(
+                    f"Explicit Stage-A baseline is not reusable: {base_dir}: {reason}"
+                )
+            print(f"[Sensitivity] reuse explicit Stage-A baseline: {base_dir}")
+        else:
+            base_dir = ensure_stage_a_seed(
+                args.python_exe,
+                artifact_root,
+                args.data_root,
+                args.device,
+                default_args,
+                base_exp_name,
+                args.dry_run,
+            )
 
     rows: list[dict[str, Any]] = []
     for param_name in selected_params:

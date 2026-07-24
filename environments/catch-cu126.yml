@@ -1,0 +1,21 @@
+name: catch-cu126
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pytorch=2.7.1
+  - pytorch-cuda=12.6
+  - numpy
+  - pandas
+  - scipy
+  - scikit-learn
+  - statsmodels
+  - ray-default
+  - tqdm
+  - psutil
+  - pip
+  - pip:
+      - pynvml
+      - reformer-pytorch==1.4.4
