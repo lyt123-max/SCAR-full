@@ -102,6 +102,14 @@ class FormalProtocolTests(unittest.TestCase):
         self.assertEqual(tep.metadata["environment"]["FORMAL_REBUTTAL"], "1")
         self.assertEqual(tep.metadata["environment"]["MAX_TEST_SEQUENCES"], "0")
 
+    def test_p0_collector_declares_strategy_and_tep_score_tables(self) -> None:
+        tasks = build_p0_tasks(Path("/artifacts"), python_exe="python")
+        collector = next(task for task in tasks if task.group == "p0_tables")
+        self.assertIn(
+            "table_p0_retrieval_strategies.csv", collector.required_artifacts
+        )
+        self.assertIn("table_p0_tep_scores.csv", collector.required_artifacts)
+
     def test_formal_protocol_rejects_nonformal_seed_and_u_eval_full(self) -> None:
         with self.assertRaisesRegex(ValueError, "seed 42"):
             validate_formal_request(seed=43)
@@ -136,6 +144,18 @@ class FormalProtocolTests(unittest.TestCase):
                 completion_files,
                 {f"test_scores_completion_scale{patch_size}.npy"},
             )
+        for task in (task for task in tasks if task.group == "e31" and task.stage == "analysis"):
+            for score_name in (
+                "raw_max",
+                "zscore_mean",
+                "cdf_mean",
+                "cdf_max",
+                "completion_scale8",
+                "completion_scale32",
+                "knn_distance",
+                "state_novelty",
+            ):
+                self.assertIn(f"scores_{score_name}.npy", task.required_artifacts)
 
 
 class ManifestContractTests(unittest.TestCase):

@@ -124,6 +124,31 @@ def collect(artifact_root: Path, output_dir: Path, *, strict: bool) -> dict[str,
         if metrics:
             main_rows.append({"method": "SCAR", "dataset": dataset, **_metric_row(metrics)})
 
+    retrieval_rows = []
+    for dataset in MAIN_DATASETS:
+        for strategy in ("full", "no_state", "no_context"):
+            experiment = artifact_root / f"scar_e1_e5_{dataset.lower()}_{strategy}"
+            metrics = required(experiment / "metrics.json")
+            if metrics:
+                retrieval_rows.append(
+                    {
+                        "dataset": dataset,
+                        "strategy": strategy,
+                        **_metric_row(metrics),
+                    }
+                )
+
+    tep_rows = []
+    tep_metrics = required(artifact_root / "scar_tep_full_seed42" / "test_metrics.json")
+    if tep_metrics:
+        tep_rows.append(
+            {
+                "dataset": "MMFDD-TEP",
+                "protocol": "M1-M6_IDV1-IDV28",
+                **_metric_row(tep_metrics),
+            }
+        )
+
     baseline_rows = []
     efficiency_rows = []
     for dataset in MAIN_DATASETS:
@@ -302,6 +327,8 @@ def collect(artifact_root: Path, output_dir: Path, *, strict: bool) -> dict[str,
 
     tables = {
         "table_p0_main5.csv": main_rows,
+        "table_p0_retrieval_strategies.csv": retrieval_rows,
+        "table_p0_tep_scores.csv": tep_rows,
         "table_p0_baselines.csv": baseline_rows,
         "table_p0_efficiency.csv": efficiency_rows,
         "table_p0_catch.csv": catch_rows,

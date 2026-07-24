@@ -145,10 +145,15 @@ def main() -> None:
 
     e31 = []
     for dataset in DATASETS:
-        path = root / f"scar_e31_{dataset.lower()}_timing_selection" / "budget_match.json"
+        result_dir = root / f"scar_e31_{dataset.lower()}_timing_selection"
+        path = result_dir / "budget_match.json"
         payload = json.loads(path.read_text(encoding="utf-8"))
         candidate = payload["candidate"]
         relative = payload["relative_error"]
+        scar_metrics = _metrics(
+            root / f"scar_main_{dataset.lower()}_seed42" / "test_metrics.json"
+        )
+        global_metrics = _metrics(result_dir / "metrics.json")
         e31.append(
             {
                 "dataset": dataset,
@@ -163,6 +168,8 @@ def main() -> None:
                 "latency_error": relative["latency_ms"],
                 "within_15_percent": payload["within_tolerance"],
                 "log_error_sum": payload["log_error_sum"],
+                **{f"scar_{key}": value for key, value in scar_metrics.items()},
+                **{f"global_{key}": value for key, value in global_metrics.items()},
             }
         )
     _write(args.output_dir / "e29_window_strategy.csv", e29)

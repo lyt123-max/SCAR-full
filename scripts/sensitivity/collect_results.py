@@ -8,7 +8,7 @@ from typing import Any
 
 
 DEFAULT_DATASETS = ["GECCO", "GENESIS", "MSL", "SMAP", "PSM", "SWAT", "SMD"]
-DEFAULT_SCORE_KEYS = ["cdf_max", "cdf_mean", "cdf_softmax"]
+CORE_SCORE_ORDER = ["raw_max", "zscore_mean", "cdf_mean", "cdf_max"]
 DEFAULT_METRIC_KEYS = [
     "roc_auc",
     "pr_auc",
@@ -30,7 +30,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--artifact-root", type=Path, default=Path("./artifacts/sensitivity"))
     parser.add_argument("--datasets", nargs="+", default=DEFAULT_DATASETS)
     parser.add_argument("--study-name-template", type=str, default="{dataset_lower}_sensitivity")
-    parser.add_argument("--score-keys", nargs="+", default=DEFAULT_SCORE_KEYS)
+    parser.add_argument(
+        "--score-keys",
+        nargs="+",
+        default=None,
+        help="Defaults to every fusion and diagnostic subscore present in each summary.",
+    )
     parser.add_argument("--metric-keys", nargs="+", default=DEFAULT_METRIC_KEYS)
     parser.add_argument("--output-prefix", type=Path, default=Path("./artifacts/sensitivity/sensitivity_summary"))
     return parser.parse_args()
@@ -112,7 +117,14 @@ def build_records(args: argparse.Namespace) -> tuple[list[dict[str, Any]], list[
             score_metrics = row.get("score_metrics", {})
             if not isinstance(score_metrics, dict):
                 score_metrics = {}
-            for score_key in args.score_keys:
+            discovered = set(str(key) for key in score_metrics)
+            score_keys = (
+                list(args.score_keys)
+                if args.score_keys
+                else [key for key in CORE_SCORE_ORDER if key in discovered]
+                + sorted(discovered.difference(CORE_SCORE_ORDER))
+            )
+            for score_key in score_keys:
                 metrics_for_score = score_metrics.get(score_key, {})
                 if not isinstance(metrics_for_score, dict):
                     metrics_for_score = {}
@@ -196,7 +208,8 @@ def main() -> None:
     print(f"[SensitivitySummary] wrote CSV: {csv_path}")
     print(f"[SensitivitySummary] wrote JSON: {json_path}")
     print("[SensitivitySummary] datasets: " + ", ".join(datasets))
-    print("[SensitivitySummary] score keys: " + ", ".join(args.score_keys))
+    actual_score_keys = sorted({str(record["score_key"]) for record in records})
+    print("[SensitivitySummary] score keys: " + ", ".join(actual_score_keys))
     print("[SensitivitySummary] metric keys: " + ", ".join(args.metric_keys))
     print(f"[SensitivitySummary] records={len(records)}")
     if missing_summaries:

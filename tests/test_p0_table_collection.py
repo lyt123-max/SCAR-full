@@ -17,6 +17,8 @@ class P0TableCollectionTests(unittest.TestCase):
             self.assertEqual(summary["formal_output_mode"], "tables_and_text_only")
             for name in (
                 "table_p0_main5.csv",
+                "table_p0_retrieval_strategies.csv",
+                "table_p0_tep_scores.csv",
                 "table_p0_baselines.csv",
                 "table_p0_efficiency.csv",
                 "table_p0_catch.csv",

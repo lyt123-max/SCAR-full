@@ -338,7 +338,7 @@ bash scripts/experiments/remote_smoke.sh
 是任务数量和复用关系的唯一口径；P0 固定为 654 个 full model fit 与 180 个
 Stage-B/Test，P1 数量只读取 manifest，不手工累计。P0 完成后运行
 `--group p0_tables`，严格生成主五集、baseline、效率、CATCH、E9/E10 和 TSB 的
-CSV 与文字摘要；缺项时该任务失败。
+CSV 与文字摘要，并单独生成 E1-E5 检索策略全分数表和 TEP 全分数表；缺项时该任务失败。
 远程路径使用 `environments/python-map.example.json` 和
 `environments/data-root-map.example.json` 为模板，正式命令同时传入
 `--python-map` 与 `--data-root-map`。

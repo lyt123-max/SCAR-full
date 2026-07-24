@@ -3,8 +3,19 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import sys
 from pathlib import Path
 from typing import Any
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.experiments.score_outputs import (
+    CORE_FUSION_SCORE_KEYS,
+    score_metric_groups,
+)
 
 
 ABLATION_LABELS = {
@@ -62,7 +73,7 @@ DEFAULT_METRIC_KEYS = [
     "vus_pr",
 ]
 
-DEFAULT_SCORE_KEYS = ["cdf_mean", "selected", "raw_max", "zscore_mean", "cdf_max", "cdf_softmax"]
+MISSING_RESULT_SCORE_KEYS = ["selected", *CORE_FUSION_SCORE_KEYS]
 
 
 def parse_args() -> argparse.Namespace:
@@ -71,7 +82,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--datasets", nargs="+", default=DEFAULT_DATASETS)
     parser.add_argument("--ablations", nargs="+", default=DEFAULT_ABLATIONS)
     parser.add_argument("--experiment_name_template", type=str, default="{dataset_lower}_ablation_{ablation}")
-    parser.add_argument("--score_keys", nargs="+", default=DEFAULT_SCORE_KEYS)
+    parser.add_argument(
+        "--score_keys",
+        nargs="+",
+        default=None,
+        help="Defaults to every fusion and diagnostic subscore present in test_metrics.json.",
+    )
     parser.add_argument("--metric_keys", nargs="+", default=DEFAULT_METRIC_KEYS)
     parser.add_argument("--output_prefix", type=Path, default=Path("./artifacts/ablation_summary"))
     parser.add_argument(
@@ -149,7 +165,24 @@ def build_records(args: argparse.Namespace) -> list[dict[str, Any]]:
             )
             payload = load_metrics_payload(args.artifact_root, experiment_name)
 
-            for score_key in args.score_keys:
+            score_payloads: dict[str, Any] = {}
+            if payload is not None:
+                selected = payload.get("selected")
+                scores_root = payload.get("scores")
+                if not isinstance(selected, dict) and isinstance(scores_root, dict):
+                    selected = scores_root.get("selected")
+                if isinstance(selected, dict):
+                    score_payloads["selected"] = selected
+                score_payloads.update(score_metric_groups(payload, require_core=False))
+            score_keys = (
+                list(args.score_keys)
+                if args.score_keys
+                else [key for key in MISSING_RESULT_SCORE_KEYS if key in score_payloads]
+                + sorted(set(score_payloads).difference(MISSING_RESULT_SCORE_KEYS))
+            )
+            if not score_keys:
+                score_keys = list(args.score_keys or MISSING_RESULT_SCORE_KEYS)
+            for score_key in score_keys:
                 record: dict[str, Any] = {
                     "dataset": dataset,
                     "ablation_key": ablation_key,
@@ -157,7 +190,7 @@ def build_records(args: argparse.Namespace) -> list[dict[str, Any]]:
                     "experiment_name": experiment_name,
                     "score_key": score_key,
                 }
-                score_payload = resolve_nested(payload, score_key) if payload is not None else None
+                score_payload = score_payloads.get(score_key)
                 for metric_key in args.metric_keys:
                     metric_value = resolve_nested(score_payload, metric_key) if isinstance(score_payload, dict) else None
                     record[metric_key] = metric_value
@@ -232,10 +265,8 @@ def main() -> None:
 
     print(f"[AblationSummary] wrote CSV: {csv_path}")
     print(f"[AblationSummary] wrote JSON: {json_path}")
-    print(
-        "[AblationSummary] included score keys: "
-        + ", ".join(args.score_keys)
-    )
+    actual_score_keys = sorted({str(record["score_key"]) for record in records})
+    print("[AblationSummary] included score keys: " + ", ".join(actual_score_keys))
     print(
         "[AblationSummary] included metric keys: "
         + ", ".join(args.metric_keys)
