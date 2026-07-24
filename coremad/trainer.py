@@ -25,19 +25,6 @@ except Exception:
     roc_auc_score = None
     HAS_SKLEARN_METRICS = False
 
-try:
-    from TSB_AD.evaluation.metrics import get_metrics as vus_get_metrics
-
-    HAS_VUS_METRICS = True
-except Exception:
-    try:
-        from vus.metrics import get_metrics as vus_get_metrics
-
-        HAS_VUS_METRICS = True
-    except Exception:
-        vus_get_metrics = None
-        HAS_VUS_METRICS = False
-
 from .config import CoReMADConfig
 from .data import (
     DataBundle,
@@ -54,6 +41,7 @@ from .memory import MemoryBank
 from .model import CoReMADModel
 from .resource_monitor import ResourceMonitor
 from .scorer import CDFPITFusion, ZScoreMeanFusion, fuse_raw_max
+from .temporal_metrics import HAS_TEMPORAL_METRICS, compute_temporal_metrics
 from .visualization import plot_score_distribution, plot_score_timeline, plot_training_curves
 
 
@@ -1353,7 +1341,7 @@ class CoReMADTrainer:
 
     def _run_test_impl(self) -> dict[str, float]:
         self._print_stage_banner("Testing")
-        if self.config.data_format == "tsb_ad" and not HAS_VUS_METRICS:
+        if self.config.data_format == "tsb_ad" and not HAS_TEMPORAL_METRICS:
             raise RuntimeError(
                 "TSB-AD evaluation requires the official VUS metrics package. "
                 "Install the dependencies listed in scripts/tsb_ad/requirements.txt."
@@ -2296,8 +2284,9 @@ class CoReMADTrainer:
         labels: np.ndarray,
         scores: np.ndarray,
         vus_window: Optional[int] = None,
+        predictions: Optional[np.ndarray] = None,
     ) -> dict[str, float]:
-        if not HAS_VUS_METRICS:
+        if not HAS_TEMPORAL_METRICS:
             return {
                 "aff_precision": float("nan"),
                 "aff_recall": float("nan"),
@@ -2318,20 +2307,12 @@ class CoReMADTrainer:
         )
 
         try:
-            results = vus_get_metrics(scores, labels, metric="all", slidingWindow=vus_window)
-            aff_precision = float(results.get("Affiliation_Precision", float("nan")))
-            aff_recall = float(results.get("Affiliation_Recall", float("nan")))
-            aff_f1 = 2.0 * aff_precision * aff_recall / max(aff_precision + aff_recall, 1e-12)
-            return {
-                "aff_precision": aff_precision,
-                "aff_recall": aff_recall,
-                "aff_f1": float(aff_f1),
-                "r_auc_roc": float(results.get("R_AUC_ROC", float("nan"))),
-                "r_auc_pr": float(results.get("R_AUC_PR", float("nan"))),
-                "vus_roc": float(results.get("VUS_ROC", float("nan"))),
-                "vus_pr": float(results.get("VUS_PR", float("nan"))),
-                "vus_window": float(vus_window),
-            }
+            return compute_temporal_metrics(
+                labels,
+                scores,
+                sliding_window=vus_window,
+                predictions=predictions,
+            )
         except Exception as exc:
             print(f"[Metrics] VUS metrics computation failed: {exc}")
             return {
@@ -2447,7 +2428,14 @@ class CoReMADTrainer:
         }
         point_metrics.update(cls._compute_pa_best_metrics(labels, scores))
         point_metrics.update(cls._compute_event_best_metrics(labels, scores))
-        point_metrics.update(cls._compute_vus_metrics(labels, scores, vus_window=vus_window))
+        point_metrics.update(
+            cls._compute_vus_metrics(
+                labels,
+                scores,
+                vus_window=vus_window,
+                predictions=pred,
+            )
+        )
         return point_metrics
 
     @staticmethod

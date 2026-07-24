@@ -625,6 +625,14 @@ TEP selected 历史序列结果可保留原评估字段；full 的故障序列�
 
 九项指标契约采用“字段强制、适用性显式”的原则：具备正负标签且时间轴连续的逐点检测任务必须输出有限数值；单类 TEP fault-only 机制序列保留九个字段并写入 `NaN` 与原因；E11/E12/E39 及纯效率/资源汇总不产生新的异常分数，只复用其来源实验的指标，不单独套用九项分类指标。PA-F1 的最优阈值搜索使用与逐阈值扫描完全等价的向量化实现，以避免 SMD、SWaT 等长序列在全分数评估时出现不可接受的 Python 循环开销。
 
+`coremad/temporal_metrics.py` 统一兼容 TSB-AD 1.5 的
+`get_metrics(score, labels, slidingWindow, pred, ...)` 接口及旧版带
+`metric="all"` 的接口，同时兼容 `VUS-ROC`/`VUS_ROC` 两类返回键。Aff-P、
+Aff-R 和 Aff-F1 使用与 Point-F1 最优阈值相同的二值预测，通过 TSB-AD 官方
+Affiliation event 实现计算；VUS-ROC/VUS-PR 仍由 TSB-AD 官方实现计算。这样九项
+指标在 SCAR、四个 baseline 和全部融合/子分数之间保持同一阈值口径，且避免长序列
+额外执行 100 次 Affiliation 阈值扫描。
+
 ## 12. 维护清单
 
 以后修改项目时按以下规则维护文档：

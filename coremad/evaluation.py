@@ -1,19 +1,23 @@
 from __future__ import annotations
 
+import importlib.util
+from pathlib import Path
+
 import numpy as np
 
 try:
-    from TSB_AD.evaluation.metrics import get_metrics as vus_get_metrics
-
-    HAS_VUS_METRICS = True
-except Exception:
-    try:
-        from vus.metrics import get_metrics as vus_get_metrics
-
-        HAS_VUS_METRICS = True
-    except Exception:
-        vus_get_metrics = None
-        HAS_VUS_METRICS = False
+    from .temporal_metrics import HAS_TEMPORAL_METRICS, compute_temporal_metrics
+except ImportError:
+    _temporal_path = Path(__file__).with_name("temporal_metrics.py")
+    _temporal_spec = importlib.util.spec_from_file_location(
+        "_coremad_temporal_metrics", _temporal_path
+    )
+    if _temporal_spec is None or _temporal_spec.loader is None:
+        raise ImportError(f"Cannot load temporal metrics from {_temporal_path}.")
+    _temporal_module = importlib.util.module_from_spec(_temporal_spec)
+    _temporal_spec.loader.exec_module(_temporal_module)
+    HAS_TEMPORAL_METRICS = _temporal_module.HAS_TEMPORAL_METRICS
+    compute_temporal_metrics = _temporal_module.compute_temporal_metrics
 
 
 def _anomaly_segments(labels: np.ndarray) -> list[tuple[int, int]]:
@@ -59,7 +63,11 @@ def _point_adjusted_metrics(labels: np.ndarray, scores: np.ndarray) -> dict[str,
     }
 
 
-def _temporal_metrics(labels: np.ndarray, scores: np.ndarray) -> dict[str, float]:
+def _temporal_metrics(
+    labels: np.ndarray,
+    scores: np.ndarray,
+    predictions: np.ndarray | None = None,
+) -> dict[str, float]:
     empty = {
         "aff_precision": float("nan"),
         "aff_recall": float("nan"),
@@ -68,7 +76,7 @@ def _temporal_metrics(labels: np.ndarray, scores: np.ndarray) -> dict[str, float
         "vus_pr": float("nan"),
         "vus_window": float("nan"),
     }
-    if not HAS_VUS_METRICS:
+    if not HAS_TEMPORAL_METRICS:
         return empty
     finite = scores[np.isfinite(scores)]
     if finite.size == 0:
@@ -83,27 +91,20 @@ def _temporal_metrics(labels: np.ndarray, scores: np.ndarray) -> dict[str, float
     lengths = [end - start for start, end in _anomaly_segments(labels)]
     vus_window = max(1, int(np.median(lengths))) if lengths else 1
     try:
-        result = vus_get_metrics(
+        result = compute_temporal_metrics(
+            labels,
             normalized,
-            labels.astype(np.int32),
-            metric="all",
-            slidingWindow=vus_window,
+            sliding_window=vus_window,
+            predictions=predictions,
         )
     except Exception:
         return empty
-    precision = float(result.get("Affiliation_Precision", float("nan")))
-    recall = float(result.get("Affiliation_Recall", float("nan")))
-    aff_f1 = (
-        2.0 * precision * recall / max(precision + recall, 1e-12)
-        if np.isfinite(precision) and np.isfinite(recall)
-        else float("nan")
-    )
     return {
-        "aff_precision": precision,
-        "aff_recall": recall,
-        "aff_f1": float(aff_f1),
-        "vus_roc": float(result.get("VUS_ROC", float("nan"))),
-        "vus_pr": float(result.get("VUS_PR", float("nan"))),
+        "aff_precision": result["aff_precision"],
+        "aff_recall": result["aff_recall"],
+        "aff_f1": result["aff_f1"],
+        "vus_roc": result["vus_roc"],
+        "vus_pr": result["vus_pr"],
         "vus_window": float(vus_window),
     }
 
@@ -174,6 +175,8 @@ def binary_point_metrics(
         "n_positive": positives,
         "n_negative": negatives,
     }
+    threshold = float(sorted_score[distinct_ends[best_index]])
+    predictions = (score >= threshold).astype(np.int8)
     result.update(_point_adjusted_metrics(y, score))
-    result.update(_temporal_metrics(y, score))
+    result.update(_temporal_metrics(y, score, predictions=predictions))
     return result
