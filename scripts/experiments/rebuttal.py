@@ -33,7 +33,6 @@ AC_CORE_GROUPS = {
     "catch",
     "efficiency",
     "e9",
-    "e11_e12",
     "mechanism",
     "tep",
 }

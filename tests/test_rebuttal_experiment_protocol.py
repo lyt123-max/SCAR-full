@@ -525,12 +525,20 @@ class ManifestContractTests(unittest.TestCase):
             python_exe="python",
         )
         self.assertEqual({task.group for task in tasks}, AC_CORE_GROUPS)
-        self.assertEqual(len(tasks), 108)
+        self.assertEqual(len(tasks), 107)
         self.assertEqual(
             sum(task.compute_kind == "full_model_fit" for task in tasks), 56
         )
         self.assertEqual(
             sum(task.compute_kind == "stage_b_test" for task in tasks), 25
+        )
+        selected_ids = {task.run_id for task in tasks}
+        self.assertTrue(
+            all(
+                dependency in selected_ids
+                for task in tasks
+                for dependency in task.dependencies
+            )
         )
 
         shard = select_tasks(

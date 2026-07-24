@@ -879,11 +879,14 @@ python scripts/experiments/rebuttal.py collect --scope p0
 ```
 
 针对三天时限内优先完成 AC 要求的队列，可使用 `--scope ac-core`。该范围固定为
-108 项：56 次 full model fit、25 次 Stage-B/Test 和 27 次 analysis。56 次完整训练
+107 项：56 次 full model fit、25 次 Stage-B/Test 和 26 次 analysis。56 次完整训练
 由 5 个 SCAR 主数据集锚点、20 个相关 baseline、30 个 SCAR 在 CATCH 缺失 CSV
 上的补充结果和 1 个 TEP full 组成；**不包含任何 CATCH 方法训练**。计划输出中的
 `group:catch=31` 专指 30 个 SCAR 补充任务和 1 个数据完整性审计，CATCH 对照数字
 只使用论文发布结果并标为 `reported from CATCH`。
+
+E11/E12 依赖完整 E10 污染折，因此保留在 P0、不得进入不含 E10 的三天 AC-core。
+AC-core 强制检查内部依赖闭包；净化敏感性由五主数据集 E9 六档阈值直接回答。
 
 双卡节点必须显式声明 GPU 槽位，调度器会为同批并发任务分别设置
 `CUDA_VISIBLE_DEVICES`，并拒绝并发数超过槽位数：
