@@ -945,6 +945,12 @@ PGRF-Net 上游模型在 `eval()` 中仍通过 `gumbel_softmax` 采样原型权�
 adapter 在每次预热/计时推理前重置 seed 42，使同一 checkpoint 的三次计时使用
 同一采样结果；不修改上游源码，且在运行 manifest 中明确记录该兼容处理。
 
+MEMTO 固定使用官方两阶段协议：每阶段最大 100 epoch、10 个 memory item，第一/
+第二阶段学习率分别为 `1e-4`/`5e-5`。上游 batch 256 由四卡 DataParallel 分摊，
+单卡 adapter 使用等效的每卡 batch 64；第二阶段显式设为 `second_train`，推理前
+切换为 `test` 以冻结 memory，并将非 parameter 的 memory tensor 随 checkpoint
+保存。k-means 与官方一致只读取训练窗口的 10%。
+
 SCAR/PaAno 环境固定 NumPy `1.26.4`，以满足 `TSB-AD==1.5` 声明的
 `numpy>=1.24.3,<2.0` 约束；PaAno 所需 statsmodels 固定为 `0.14.5`。若使用 pip
 构建兼容环境，必须明确配对 torch `2.7.1`、torchvision `0.22.1` 和 torchaudio

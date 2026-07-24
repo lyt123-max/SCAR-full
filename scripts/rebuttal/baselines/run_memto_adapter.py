@@ -5,16 +5,25 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from sklearn.preprocessing import StandardScaler
 
-from common import (
-    REPO_ROOT,
-    load_common_data,
-    measure_inference,
-    overlap_average,
-    save_standard_outputs,
-    set_seed,
-)
+try:
+    from .common import (
+        REPO_ROOT,
+        load_common_data,
+        measure_inference,
+        overlap_average,
+        save_standard_outputs,
+        set_seed,
+    )
+except ImportError:
+    from common import (
+        REPO_ROOT,
+        load_common_data,
+        measure_inference,
+        overlap_average,
+        save_standard_outputs,
+        set_seed,
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -25,8 +34,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--window-size", type=int, default=100)
-    parser.add_argument("--epochs", type=int, default=10)
-    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--n-memory", type=int, default=10)
     return parser.parse_args()
 
 
@@ -48,6 +58,7 @@ def main() -> None:
     from kmeans_pytorch import kmeans
     from model.Transformer import TransformerVar
     from model.loss_functions import EntropyLoss, GatheringLoss
+    from sklearn.preprocessing import StandardScaler
 
     set_seed(args.seed)
     train, test, labels = load_common_data(args.data_dir)
@@ -57,7 +68,7 @@ def main() -> None:
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     input_channels = train.shape[1]
     d_model = 512
-    n_memory = 128
+    n_memory = args.n_memory
 
     train_windows = _windows(torch, train, args.window_size, args.window_size)
     loader = torch.utils.data.DataLoader(
@@ -66,7 +77,7 @@ def main() -> None:
     entropy_loss = EntropyLoss()
     reconstruction = nn.MSELoss()
 
-    def make_model(memory=None):
+    def make_model(memory=None, *, phase_type=None):
         model = TransformerVar(
             win_size=args.window_size,
             enc_in=input_channels,
@@ -77,13 +88,13 @@ def main() -> None:
             device=device,
             memory_init_embedding=memory,
             memory_initial=False,
-            phase_type=None,
+            phase_type=phase_type,
             dataset_name=args.dataset,
         )
         return model.to(device)
 
-    def fit(model):
-        optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+    def fit(model, *, learning_rate: float):
+        optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
         model.train()
         for _ in range(args.epochs):
             for batch in loader:
@@ -96,11 +107,20 @@ def main() -> None:
                 optimizer.step()
 
     first_model = make_model()
-    fit(first_model)
+    fit(first_model, learning_rate=1e-4)
     first_model.eval()
+    first_model.mem_module.phase_type = "test"
     query_rows = []
+    kmeans_window_count = max(1, int(len(train_windows) * 0.1))
+    kmeans_loader = torch.utils.data.DataLoader(
+        torch.utils.data.Subset(
+            train_windows, range(kmeans_window_count)
+        ),
+        batch_size=args.batch_size,
+        shuffle=False,
+    )
     with torch.inference_mode():
-        for batch in loader:
+        for batch in kmeans_loader:
             query_rows.append(first_model(batch.float().to(device))["queries"])
     query_values = torch.cat(query_rows, dim=0).reshape(-1, d_model)
     _, centers = kmeans(
@@ -109,10 +129,20 @@ def main() -> None:
         distance="euclidean",
         device=device,
     )
-    model = make_model(centers.detach())
-    fit(model)
+    model = make_model(centers.detach(), phase_type="second_train")
+    fit(model, learning_rate=5e-5)
+    model.eval()
+    model.mem_module.phase_type = "test"
+    trained_memory = model.mem_module.mem.detach().clone()
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    torch.save(model.state_dict(), args.output_dir / "model.pt")
+    torch.save(
+        {
+            "model_state_dict": model.state_dict(),
+            "memory": trained_memory,
+            "phase_type": "test",
+        },
+        args.output_dir / "model.pt",
+    )
 
     gathering = GatheringLoss(reduce=False)
     criterion = nn.MSELoss(reduction="none")
@@ -153,6 +183,9 @@ def main() -> None:
             ),
             "compatibility_changes": [
                 "replace upstream four-GPU DataParallel with selected single device",
+                "use batch 64, matching the official batch 256 split over four GPUs",
+                "use official 10 memory items and 100-epoch phase limits",
+                "set second_train/test phases explicitly and checkpoint memory items",
                 "export raw point scores omitted by upstream test()",
             ],
         },

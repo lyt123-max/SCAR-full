@@ -7,6 +7,7 @@ import numpy as np
 
 from scripts.rebuttal.baselines.common import fixed_seed_inference
 from scripts.rebuttal.baselines.run_baseline import FORMAL_METHODS, build_adapter_command
+from scripts.rebuttal.baselines.run_memto_adapter import parse_args as parse_memto_args
 from scripts.rebuttal.baselines.run_paano_adapter import parse_args as parse_paano_args
 
 
@@ -84,6 +85,25 @@ class BaselineRunnerTests(unittest.TestCase):
     def test_fixed_seed_inference_replays_stochastic_upstream_path(self) -> None:
         infer = fixed_seed_inference(lambda: np.random.random(8), seed=42)
         np.testing.assert_array_equal(infer(), infer())
+
+    def test_memto_adapter_matches_official_memory_and_phase_limits(self) -> None:
+        import sys
+        from unittest.mock import patch
+
+        argv = [
+            "run_memto_adapter.py",
+            "--data-dir",
+            "/data",
+            "--output-dir",
+            "/out",
+            "--dataset",
+            "MSL",
+        ]
+        with patch.object(sys, "argv", argv):
+            args = parse_memto_args()
+        self.assertEqual(args.epochs, 100)
+        self.assertEqual(args.n_memory, 10)
+        self.assertEqual(args.batch_size, 64)
 
 
 if __name__ == "__main__":
