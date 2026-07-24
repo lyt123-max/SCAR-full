@@ -50,7 +50,7 @@ FORMAL_REBUTTAL=0 TEP_MECHANISM_POSTPROCESS=0 ARTIFACT_ROOT="${SMOKE_ROOT}" \
 EXP_NAME=smoke_tep DEVICE="${DEVICE}" \
 bash scripts/main/train_tep_full.sh full smoke_tep smoke_tep "${TEP_DATA_ROOT}"
 
-for method in PaAno MEMTO PUAD PGRF-Net CATCH; do
+for method in PaAno MEMTO PUAD PGRF-Net; do
   variable="$(printf '%s' "${method}" | tr '[:lower:]-' '[:upper:]_')_PYTHON"
   baseline_python="${!variable:?set ${variable} to the method environment Python}"
   "${baseline_python}" scripts/experiments/freeze_conda_env.py \

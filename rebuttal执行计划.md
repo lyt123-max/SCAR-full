@@ -202,7 +202,7 @@ E3 不再启动独立实验，直接复用 E1/E2 结果：
 
 1. PaAno：必须完成，作为近期 patch/reference 方法；
 2. MEMTO、PUAD、PGRF-Net：使用公开 Python 官方实现完成 memory/prototype 对比；
-3. CATCH：作为现有强频域基线和统一效率锚点；
+3. CATCH：直接引用官方 benchmark 结果，不在 rebuttal 阶段重跑；
 4. DAMP、GDFlex：完成逐项协议审计。当前没有 MATLAB 环境，不把“缺少 MATLAB”
    伪装成协议不兼容；GDFlex 另需明确其官方 ML/UCR 单变量协议边界。
 
@@ -225,7 +225,8 @@ E3 不再启动独立实验，直接复用 E1/E2 结果：
 
 #### 实验 E7：新增最相关外部基线
 
-1. 五个主数据集固定运行 PaAno、MEMTO、PUAD、PGRF-Net 和 CATCH；
+1. 五个主数据集固定运行 PaAno、MEMTO、PUAD 和 PGRF-Net；CATCH 不重跑，使用
+   官方发布结果并明确标记为 `reported from CATCH`；
 2. 保持与 SCAR 相同的数据划分与预处理；
 3. 若方法仅支持单变量：
    - 首选寻找其官方多变量扩展；
@@ -402,11 +403,7 @@ E12 不再启动独立训练，直接从 E10 的污染 manifest、重构误差�
 2. 对当前五个主数据集之外的全部兼容真实数据集运行 SCAR，不按结果选择；
 3. ASD 的 12 个子数据集全部运行，并按预先固定的 family macro-average 汇总；
 4. 若某些数据集规模过大，使用官方推荐配置并保留完整资源记录；
-5. 对新增数据集至少加入以下代表基线：
-   - CATCH；
-   - 一个 memory/prototype 方法；
-   - 一个 retrieval/subsequence 方法；
-   - 一个 reconstruction/forecasting 方法。
+5. CATCH 不重跑；新增数据集只补 SCAR 结果，并与 CATCH 官方发布结果对照；
 6. 报告新增数据集上的 AUROC/AP；
 7. 报告 12 个真实数据集族的平均排名；
 8. 若任何数据因技术原因失败，保留失败日志并在排除表中给出具体原因。
@@ -416,7 +413,7 @@ E12 不再启动独立训练，直接从 E10 的污染 manifest、重构误差�
 1. 使用本地 CATCH 官方六类合成异常文件，每类包含两个异常比例版本，共 12 个 CSV；
 2. 补充生成协议、异常比例、强度和持续时间；
 3. 报告每个原始 CSV 的 AUROC/AP，并按异常类型汇总两个比例版本；
-4. 与 CATCH 及最相关可运行基线比较；
+4. 与 CATCH 官方发布结果比较，不为这些合成文件重新训练 CATCH；
 5. 增加总体平均和各异常类型结果，不制作雷达图。
 
 ### 需要新增的表格
@@ -1009,13 +1006,13 @@ rebuttal 必需项。**
    - 峰值 CPU 内存；
    - memory bank 磁盘/内存占用；
    - 参数量。
-4. 固定比较：
+4. 固定重跑比较：
    - SCAR；
    - PaAno；
    - MEMTO；
    - PUAD；
-   - PGRF-Net；
-   - CATCH。
+   - PGRF-Net。
+   CATCH 仅作为官方 `reported` 性能参照，不纳入本次资源实测；
 5. 每个模型仅使用 seed `42` 训练一次；
 6. 性能和资源数据必须来自同一次正式训练，禁止为效率表另行重训；
 7. 推理在充分预热后重复计时 3 次，报告原始计时、均值和标准差，性能指标仅报告
@@ -1053,7 +1050,7 @@ rebuttal 仅保留可由 E38 直接得到的 bank size、latency 和 RAM 缩放�
 
 ### 需要新增的表格
 
-- 表：五数据集 × 六方法的参数、训练时间、建库时间、推理吞吐、显存、CPU 内存和 bank size；
+- 表：五数据集 × 五个实测方法的参数、训练时间、建库时间、推理吞吐、显存、CPU 内存和 bank size；CATCH 仅列官方性能，不填本次资源实测值；
 - 表：五数据集 memory keep ratio 的 AUROC/AP、latency、RAM 和 bank size；
 - 表：理论复杂度。
 
@@ -1272,7 +1269,7 @@ Reviewer dk9H 与另外两位审稿人一致，认为当前虽然基线数量多
 ### 实验组 B：五数据集最近相关基线与资源比较
 
 - E6 全部相关方法兼容性审计；
-- E7 PaAno、MEMTO、PUAD、PGRF-Net、CATCH 五数据集正式运行；
+- E7 PaAno、MEMTO、PUAD、PGRF-Net 五数据集正式运行；CATCH 不重跑；
 - E37 同次训练采集性能、时间、GPU/CPU 内存、吞吐和产物大小；
 - E8 SCAR 内部 retrieval 对照；
 - DAMP/GDFlex 只做诚实协议与运行环境说明，不生成未经验证的替代数字。
@@ -1652,7 +1649,8 @@ Reviewer dk9H 与另外两位审稿人一致，认为当前虽然基线数量多
 ## 阶段 0：远程服务器与协议冻结
 
 1. 记录服务器 GPU/CPU/RAM、驱动、CUDA、PyTorch、Python 和 Git commit；
-2. 建立 SCAR 与 PaAno/MEMTO/PUAD/PGRF-Net/CATCH 的独立可复现环境；
+2. 建立 SCAR 与 PaAno/MEMTO/PUAD/PGRF-Net 的独立可复现环境；保留 CATCH
+   环境说明，但不把它加入正式队列；
 3. 安装并验证统一资源监控；
 4. 对每条流水线先执行一个小样本 dry-run 和一个模型级 smoke test；
 5. 冻结数据 manifests、seed `42`、指标、融合方式和失败处理规则；
@@ -1663,7 +1661,7 @@ Reviewer dk9H 与另外两位审稿人一致，认为当前虽然基线数量多
 1. 在 MSL、PSM、SMAP、SMD、SWaT 各训练一次 SCAR seed-42 Stage-A；
 2. 构建默认 Stage-B、测试并全程采集 E37 资源数据；
 3. 保存 checkpoint、config、逐点 scores、memory provenance、resource JSON 和环境清单；
-4. 对 PaAno、MEMTO、PUAD、PGRF-Net、CATCH 五数据集正式训练；
+4. 对 PaAno、MEMTO、PUAD、PGRF-Net 做五数据集正式训练；CATCH 只读取官方结果；
 5. 同次生成性能表 T3 和效率表 T8，不为效率单独重跑。
 
 ## 阶段 2：复用五数据集 checkpoint 完成机制与鲁棒性
@@ -1714,7 +1712,8 @@ Reviewer dk9H 与另外两位审稿人一致，认为当前虽然基线数量多
 4. 五个主数据集上的净化比例敏感性；
 5. 五个主数据集上的训练污染率鲁棒性；
 6. TEP 六模式全故障；
-7. 五数据集 × SCAR/PaAno/MEMTO/PUAD/PGRF-Net/CATCH 的性能和资源比较；
+7. 五数据集 × SCAR/PaAno/MEMTO/PUAD/PGRF-Net 的性能和资源比较，并列出 CATCH
+   官方 reported 性能作为参照；
 8. 五数据集 memory keep ratio 的性能—效率—bank size 折中；
 9. CATCH 当前五数据集之外的全部兼容真实数据集；
 10. CATCH 六类合成异常、12 个原始 CSV；
@@ -1780,7 +1779,8 @@ Reviewer dk9H 与另外两位审稿人一致，认为当前虽然基线数量多
 - [ ] CATCH 当前五数据集之外的全部兼容真实数据和六类合成异常均有结果或明确失败记录；
 - [ ] TSB-AD-M Eva 180 和 U Eva 350 均完成；
 - [ ] E9 和 E10 均覆盖 MSL、PSM、SMAP、SMD、SWaT；
-- [ ] SCAR 与 PaAno/MEMTO/PUAD/PGRF-Net/CATCH 在五个主数据集上完成性能和资源比较；
+- [ ] SCAR 与 PaAno/MEMTO/PUAD/PGRF-Net 在五个主数据集上完成性能和资源比较；
+  CATCH 只使用官方 reported 结果，且正式 manifest 中不存在 CATCH 训练任务；
 - [ ] 所有新增结果均来自统一协议；
 - [ ] 所有正式随机实验均使用固定模型 seed `42`，未把调试 seed、bootstrap 或计时重复误写成模型 seed 重复；
 - [ ] 所有无法比较的方法均给出逐项技术原因；

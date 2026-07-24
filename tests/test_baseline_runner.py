@@ -3,11 +3,14 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from scripts.rebuttal.baselines.run_baseline import build_adapter_command
+from scripts.rebuttal.baselines.run_baseline import FORMAL_METHODS, build_adapter_command
 
 
 class BaselineRunnerTests(unittest.TestCase):
-    def test_all_formal_methods_have_project_side_adapters(self) -> None:
+    def test_formal_methods_exclude_reported_catch(self) -> None:
+        self.assertEqual(FORMAL_METHODS, ("PaAno", "MEMTO", "PUAD", "PGRF-Net"))
+
+    def test_all_supported_methods_have_project_side_adapters(self) -> None:
         for method in ("PaAno", "MEMTO", "PUAD", "PGRF-Net", "CATCH"):
             command = build_adapter_command(
                 method=method,

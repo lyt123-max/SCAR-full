@@ -45,7 +45,7 @@ def static_checks(artifact_root: Path) -> list[dict]:
     add("p0_unique_run_ids", len({task.run_id for task in p0}) == len(p0), len(p0))
     add(
         "p0_compute_counts",
-        sum(task.compute_kind == "full_model_fit" for task in p0) == 659
+        sum(task.compute_kind == "full_model_fit" for task in p0) == 654
         and sum(task.compute_kind == "stage_b_test" for task in p0) == 180,
         {
             "full": sum(task.compute_kind == "full_model_fit" for task in p0),
@@ -75,7 +75,11 @@ def static_checks(artifact_root: Path) -> list[dict]:
         None,
     )
     baseline = [task for task in p0 if task.group == "baselines"]
-    add("baseline_matrix_5x5", len(baseline) == 25, len(baseline))
+    add(
+        "baseline_matrix_4x5_without_catch_reruns",
+        len(baseline) == 20 and all(task.method != "CATCH" for task in baseline),
+        {"count": len(baseline), "methods": sorted({task.method for task in baseline})},
+    )
     e10_protocol = [task for task in p0 if task.group == "e10_protocol"]
     e10_runs = [task for task in p0 if task.group == "e10"]
     e10_zero = [task for task in p0 if task.group == "e10_zero"]

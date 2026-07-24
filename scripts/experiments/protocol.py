@@ -470,7 +470,9 @@ def build_p0_tasks(artifact_root: Path, *, python_exe: str) -> list[RunSpec]:
                 )
             )
 
-    for method in ("PaAno", "MEMTO", "PUAD", "PGRF-Net", "CATCH"):
+    # CATCH is compared using its official reported benchmark results.  Do not
+    # spend rebuttal compute reproducing it under a second protocol.
+    for method in ("PaAno", "MEMTO", "PUAD", "PGRF-Net"):
         for dataset in MAIN_DATASETS:
             name = f"baseline_{method.lower().replace('-', '_')}_{dataset.lower()}_seed42"
             tasks.append(

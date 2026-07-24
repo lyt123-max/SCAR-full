@@ -699,12 +699,12 @@ CATCH 论文 Table 4 的 anomaly ratio 使用全序列长度作为分母，而 S
    数据集级汇总方式和正式随机种子 `42`。
 2. 方法专属配置保留官方推荐值：窗口长度、patch、网络宽度、优化器、学习率和 epoch
    不强制与 SCAR 相同；这些参数分别通过各自训练侧验证集选择，不查看测试标签。
-3. 为避免把 CATCH 官方发布结果误写成统一协议重跑结果，论文应明确区分
-   `reported from CATCH` 与 `reproduced under our unified protocol`。
-4. 正式 rebuttal 补跑 CATCH 时固定使用 seed `42`，输出固定 seed AUROC/AP；
-   不得从调试 seed 或多个 score 版本中逐数据集挑选最优值。
-5. 当前主表可暂时保留 CATCH 官方发布数值作为 `reported` 结果，但“all methods are
-   evaluated under the same protocol”应改为更精确的表述，直到统一协议补跑完成。
+3. CATCH 不重跑，论文中的 CATCH 数字统一标记为 `reported from CATCH`，不得写成
+   `reproduced under our unified protocol`。
+4. 正式 rebuttal 只补跑 SCAR 相对 CATCH benchmark 缺失的 30 个 CSV；这些运行固定
+   seed `42`，不得从调试 seed 或多个 score 版本中逐数据集挑选最优值。
+5. “all methods are evaluated under the same protocol”应改为更精确的表述，明确
+   SCAR 新结果与 CATCH 官方 reported 结果的来源差异。
 
 ## 15. Reviewer muQn 专项实现
 
@@ -744,8 +744,9 @@ MSL、PSM、SMAP、SMD、SWaT 五个主数据集完整运行。污染率固定�
 
 ### 15.4 基线边界
 
-五个主数据集的正式相关基线固定优先运行 PaAno、MEMTO、PUAD、PGRF-Net 和 CATCH，
-并与 SCAR 在相同远程服务器上同步记录性能、时间、GPU/CPU 内存和产物大小。PaAno
+五个主数据集的正式相关基线固定优先运行 PaAno、MEMTO、PUAD 和 PGRF-Net，
+并与 SCAR 在相同远程服务器上同步记录性能、时间、GPU/CPU 内存和产物大小。CATCH
+不重跑，只引用官方 benchmark 结果并标记为 `reported from CATCH`。PaAno
 使用官方多变量实现。DAMP 官方 `DAMP_Multidim.m` 和 GDFlex 均依赖 MATLAB；当前没有
 可用 MATLAB 环境，因此只保留只读适配和协议审计，不生成未经官方环境验证的替代实现
 数字，也不把“缺少 MATLAB”描述成任务协议不兼容。GDFlex 还需单独说明其官方入口绑定
@@ -778,7 +779,8 @@ GPU 记录逻辑索引、物理索引/UUID 和映射来源；`CUDA_VISIBLE_DEVIC
 正式效率实验只训练固定 seed `42` 的模型一次。推理阶段在预热后独立计时 3 次并保留
 原始计时、均值和标准差；该波动仅表示系统测量噪声，不是模型随机种子方差。
 
-外部 baseline 通过只读命令包装器接入：
+外部 baseline 通过只读命令包装器接入。以下命令仅展示包装器接口；CATCH 不进入
+正式 rebuttal 队列：
 
 ```bash
 python scripts/efficiency/monitor_command.py \
@@ -813,15 +815,16 @@ GPU 的 NVML 时，会在启动 baseline 前失败。`--strict-dependencies 0` �
 1. 五个主数据集的 SCAR Stage-A 每个数据集只训练一次 seed `42`；
 2. 检索机制、净化、污染和 memory keep ratio 复用相同 checkpoint，仅重建 Stage-B
    或重新推理；
-3. SCAR 与 PaAno、MEMTO、PUAD、PGRF-Net、CATCH 首次正式训练即启用资源监控，
-   同一次运行同时产生性能和效率结果；
+3. SCAR 与 PaAno、MEMTO、PUAD、PGRF-Net 首次正式训练即启用资源监控，同一次
+   运行同时产生性能和效率结果；CATCH 不重跑、不进入本次资源实测；
 4. 所有任务保存配置、环境、checkpoint、逐点 score、memory provenance、失败日志和
    `resource_metrics.json`。
 
 正式数据覆盖固定为：
 
-- CATCH：补齐当前五个主数据集之外的全部兼容真实数据；ASD 12 个子数据集全部运行并
-  以 family macro-average 汇总；六类合成异常的两个比例版本共 12 个 CSV 全部运行；
+- CATCH 覆盖：只运行 SCAR 补齐当前五个主数据集之外的全部兼容真实数据；ASD 12 个
+  子数据集全部运行并以 family macro-average 汇总；六类合成异常的两个比例版本共
+  12 个 CSV 全部运行；CATCH 方法本身不重跑，直接引用官方结果；
 - TSB-AD-M：使用 tuning 20 条冻结配置，正式评估 M-Eva 180 条；
 - TSB-AD-U：使用 tuning 48 条冻结配置，正式运行官方默认 U-Eva 350 条；
 - U-Eva-Full 822 是官方仓库发布的扩展清单，仅保留为论文修订 backlog，不进入
@@ -842,7 +845,7 @@ rebuttal 必需项。完整任务矩阵和表格字段以 `rebuttal执行计划.
 `clean_ratio=0` 的逐点分数按三折 mask 重评估，只运行 135 个非零污染
 Stage-B/Test；E38 复用 `coreset_keep_ratio=1.0`，只新增 20 个 Stage-B/Test；
 按 M/U 各验证一个预注册配置核算，TSB-AD 为 tuning 68 加 official evaluation 530，
-共 598 次 full。完整 P0 为 659 次 full model fit 和 180 次 Stage-B/Test；若在 tuning
+共 598 次 full。完整 P0 为 654 次 full model fit 和 180 次 Stage-B/Test；若在 tuning
 清单比较多组配置，额外运行量按 `20×H_M + 48×H_U` 计算并单独登记。
 
 ## 18. Rebuttal 统一实验入口
@@ -893,11 +896,12 @@ bash scripts/experiments/remote_smoke.sh
 正式环境目标为 Python 3.11、PyTorch 2.7.1、CUDA 12.6。环境输入规格位于
 `environments/`；创建环境后使用 `scripts/experiments/freeze_conda_env.py` 保存
 平台相关 explicit lock、pip freeze、驱动版本和 GPU UUID。PaAno/MEMTO/PUAD/
-PGRF-Net/CATCH 均通过项目侧 adapter 使用只读上游源码，统一导出 `scores.npy`、
-`labels.npy`、AUROC/AP、1 次预热加 3 次计时、资源 JSON 和运行 manifest。
+PGRF-Net 通过项目侧 adapter 使用只读上游源码，统一导出 `scores.npy`、`labels.npy`、
+AUROC/AP、1 次预热加 3 次计时、资源 JSON 和运行 manifest。CATCH adapter 仅作为
+论文修订复现工具保留，不进入正式 manifest。
 
-当前中央 manifest 共 1230 项：P0 为 903 项，P1 为 327 项；其中实际重计算口径仍为
-P0 的 659 次 full model fit 与 180 次 Stage-B/Test，新增的 E10 冻结协议和 P0
+当前中央 manifest 共 1225 项：P0 为 898 项，P1 为 327 项；其中实际重计算口径为
+P0 的 654 次 full model fit 与 180 次 Stage-B/Test，新增的 E10 冻结协议和 P0
 表格收口均为 analysis，不增加训练。TEP full 按序列级产物验收，正式要求
 `test_sequence_scores_selected.npy`、序列表、指标、资源、checkpoint、memory、
 fusion 和 full memory audit；`max_test_sequences` 仅供远程 smoke 显式限为 2，

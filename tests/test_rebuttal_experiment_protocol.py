@@ -57,9 +57,18 @@ class FormalProtocolTests(unittest.TestCase):
         tasks = build_p0_tasks(Path("/artifacts"), python_exe="python")
         full = [task for task in tasks if task.compute_kind == "full_model_fit"]
         stage_b = [task for task in tasks if task.compute_kind == "stage_b_test"]
-        self.assertEqual(len(full), 659)
+        self.assertEqual(len(full), 654)
         self.assertEqual(len(stage_b), 180)
         self.assertEqual(len({task.run_id for task in tasks}), len(tasks))
+
+    def test_formal_baseline_queue_does_not_rerun_catch(self) -> None:
+        tasks = build_p0_tasks(Path("/artifacts"), python_exe="python")
+        baselines = [task for task in tasks if task.group == "baselines"]
+        self.assertEqual(len(baselines), 20)
+        self.assertEqual(
+            {task.method for task in baselines},
+            {"PaAno", "MEMTO", "PUAD", "PGRF-Net"},
+        )
 
     def test_e10_uses_one_frozen_protocol_per_dataset(self) -> None:
         tasks = build_p0_tasks(Path("/artifacts"), python_exe="python")
@@ -287,7 +296,7 @@ class ManifestContractTests(unittest.TestCase):
     def test_plan_summary_separates_recomputation_kinds(self) -> None:
         tasks = build_p0_tasks(Path("/artifacts"), python_exe="python")
         summary = summarize_tasks(tasks)
-        self.assertEqual(summary["full_model_fit"], 659)
+        self.assertEqual(summary["full_model_fit"], 654)
         self.assertEqual(summary["stage_b_test"], 180)
         self.assertGreater(summary["total"], 0)
 
@@ -393,7 +402,7 @@ class ManifestContractTests(unittest.TestCase):
             output = Path(temp)
             tasks = build_p0_tasks(Path("/artifacts"), python_exe="python")
             payload = write_plan(tasks, output)
-            self.assertEqual(payload["summary"]["full_model_fit"], 659)
+            self.assertEqual(payload["summary"]["full_model_fit"], 654)
             lines = (output / "plan.jsonl").read_text(encoding="utf-8").splitlines()
             self.assertEqual(len(lines), len(tasks))
             self.assertEqual(json.loads(lines[0])["run_id"], tasks[0].run_id)
