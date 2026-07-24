@@ -70,6 +70,22 @@ class FormalProtocolTests(unittest.TestCase):
             {"PaAno", "MEMTO", "PUAD", "PGRF-Net"},
         )
 
+    def test_formal_scar_tasks_parallelize_score_metrics(self) -> None:
+        tasks = build_p0_tasks(Path("/artifacts"), python_exe="python")
+        score_tasks = [
+            task
+            for task in tasks
+            if task.method == "SCAR" and task.stage in {"full", "stage_b_test"}
+        ]
+        self.assertTrue(score_tasks)
+        self.assertTrue(
+            all(
+                task.metadata.get("environment", {}).get("SCAR_METRIC_WORKERS")
+                == "8"
+                for task in score_tasks
+            )
+        )
+
     def test_e10_uses_one_frozen_protocol_per_dataset(self) -> None:
         tasks = build_p0_tasks(Path("/artifacts"), python_exe="python")
         protocols = [task for task in tasks if task.group == "e10_protocol"]

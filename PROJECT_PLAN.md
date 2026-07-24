@@ -633,6 +633,12 @@ Affiliation event 实现计算；VUS-ROC/VUS-PR 仍由 TSB-AD 官方实现计算
 指标在 SCAR、四个 baseline 和全部融合/子分数之间保持同一阈值口径，且避免长序列
 额外执行 100 次 Affiliation 阈值扫描。
 
+正式 SCAR/TEP 任务通过 manifest 环境元数据固定
+`SCAR_METRIC_WORKERS=8`，在 GPU 推理结束后并行评估不同融合与子分数。线程只读取
+相同 labels/scores 并分别调用无共享状态的评估器，不改变模型、分数或指标定义；
+最终结果仍按注册表顺序写入。该设置利用远程多核 CPU，避免 SMD/SWaT 的官方 VUS
+计算长时间阻塞下一项 GPU 任务。
+
 ## 12. 维护清单
 
 以后修改项目时按以下规则维护文档：

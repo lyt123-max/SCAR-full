@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import random
 import shutil
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -1393,12 +1395,36 @@ class CoReMADTrainer:
         cdf_softmax_scores = metric_sources["cdf_softmax"]
         all_metrics: dict[str, dict[str, float]] = {}
         with self._resource_span("evaluation") as resource_span:
-            for name, scores in metric_sources.items():
-                mode_metrics = self._compute_metrics(
-                    raw_bundle.test_labels,
-                    scores,
-                    vus_window=raw_bundle.evaluation_vus_window,
+            metric_workers = max(1, int(os.environ.get("SCAR_METRIC_WORKERS", "1")))
+            metric_workers = min(metric_workers, len(metric_sources))
+            if metric_workers > 1:
+                print(
+                    f"[Test] evaluating {len(metric_sources)} score streams "
+                    f"with {metric_workers} metric workers"
                 )
+                with ThreadPoolExecutor(max_workers=metric_workers) as executor:
+                    metric_futures = {
+                        name: executor.submit(
+                            self._compute_metrics,
+                            raw_bundle.test_labels,
+                            scores,
+                            raw_bundle.evaluation_vus_window,
+                        )
+                        for name, scores in metric_sources.items()
+                    }
+                    computed_metrics = {
+                        name: metric_futures[name].result() for name in metric_sources
+                    }
+            else:
+                computed_metrics = {
+                    name: self._compute_metrics(
+                        raw_bundle.test_labels,
+                        scores,
+                        vus_window=raw_bundle.evaluation_vus_window,
+                    )
+                    for name, scores in metric_sources.items()
+                }
+            for name, mode_metrics in computed_metrics.items():
                 all_metrics[name] = mode_metrics
                 print(
                     f"[Test] {name}: roc_auc={mode_metrics['roc_auc']:.6f} "

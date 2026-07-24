@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -300,6 +301,7 @@ def _scar_task(
         artifact_dir=artifact_dir,
         required_artifacts=required_artifacts,
         dependencies=dependencies,
+        metadata={"environment": {"SCAR_METRIC_WORKERS": "8"}},
     )
 
 
@@ -348,6 +350,16 @@ def _analysis_task(
         required_artifacts=required,
         dependencies=dependencies,
     )
+
+
+def _with_metric_workers(task: RunSpec) -> RunSpec:
+    if task.method != "SCAR":
+        return task
+    metadata = dict(task.metadata)
+    environment = dict(metadata.get("environment", {}))
+    environment["SCAR_METRIC_WORKERS"] = "8"
+    metadata["environment"] = environment
+    return replace(task, metadata=metadata)
 
 
 def build_p0_tasks(artifact_root: Path, *, python_exe: str) -> list[RunSpec]:
@@ -418,6 +430,7 @@ def build_p0_tasks(artifact_root: Path, *, python_exe: str) -> list[RunSpec]:
                     "FORMAL_REBUTTAL": "1",
                     "TEP_ALLOW_PLOTS": "0",
                     "MAX_TEST_SEQUENCES": "0",
+                    "SCAR_METRIC_WORKERS": "8",
                 }
             },
         )
@@ -968,7 +981,7 @@ def build_p0_tasks(artifact_root: Path, *, python_exe: str) -> list[RunSpec]:
         )
     )
 
-    return tasks
+    return [_with_metric_workers(task) for task in tasks]
 
 
 def _strategy_task(
@@ -1252,4 +1265,4 @@ def build_p1_tasks(artifact_root: Path, *, python_exe: str) -> list[RunSpec]:
         )
     )
 
-    return tasks
+    return [_with_metric_workers(task) for task in tasks]
