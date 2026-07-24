@@ -937,6 +937,10 @@ PGRF-Net 通过项目侧 adapter 使用只读上游源码，统一导出 `scores
 AUROC/AP、1 次预热加 3 次计时、资源 JSON 和运行 manifest。CATCH adapter 仅作为
 论文修订复现工具保留，不进入正式 manifest。
 
+`run_baseline.py --smoke` 仅用于远程模型级兼容性检查：PaAno 运行 1 iteration，
+MEMTO/PUAD 运行 1 epoch，PGRF-Net 两阶段各运行 1 epoch 且 patience 为 1。正式
+中央 manifest 不传该参数，仍使用各 adapter 的完整默认训练量。
+
 SCAR/PaAno 环境固定 NumPy `1.26.4`，以满足 `TSB-AD==1.5` 声明的
 `numpy>=1.24.3,<2.0` 约束；PaAno 所需 statsmodels 固定为 `0.14.5`。若使用 pip
 构建兼容环境，必须明确配对 torch `2.7.1`、torchvision `0.22.1` 和 torchaudio

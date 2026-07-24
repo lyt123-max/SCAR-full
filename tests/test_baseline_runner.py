@@ -38,6 +38,27 @@ class BaselineRunnerTests(unittest.TestCase):
                 device="cuda:0",
             )
 
+    def test_smoke_commands_reduce_every_training_loop(self) -> None:
+        expected = {
+            "PaAno": ("--num-iters", "1"),
+            "MEMTO": ("--epochs", "1"),
+            "PUAD": ("--epochs", "1"),
+            "PGRF-Net": ("--epochs-stage1", "1"),
+        }
+        for method, pair in expected.items():
+            command = build_adapter_command(
+                method=method,
+                baseline_python="/env/python",
+                data_dir=Path("/data"),
+                output_dir=Path("/output"),
+                dataset="MSL",
+                seed=42,
+                device="cuda:0",
+                smoke=True,
+            )
+            index = command.index(pair[0])
+            self.assertEqual(command[index + 1], pair[1])
+
     def test_paano_adapter_matches_official_multivariate_hyperparameters(self) -> None:
         import sys
         from unittest.mock import patch

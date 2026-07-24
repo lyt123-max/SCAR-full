@@ -25,6 +25,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--window-size", type=int, default=60)
+    parser.add_argument("--epochs-stage1", type=int, default=50)
+    parser.add_argument("--epochs-stage2", type=int, default=20)
+    parser.add_argument("--patience-stage1", type=int, default=10)
+    parser.add_argument("--patience-stage2", type=int, default=5)
     return parser.parse_args()
 
 
@@ -60,13 +64,13 @@ def main() -> None:
         num_spike_protos=10,
     ).to(device)
     params = {
-        "epochs_stage1": 50,
+        "epochs_stage1": args.epochs_stage1,
         "lr": 1e-4,
         "batch_size": 128,
-        "patience_stage1": 10,
-        "epochs_stage2": 20,
+        "patience_stage1": args.patience_stage1,
+        "epochs_stage2": args.epochs_stage2,
         "lr_stage2": 1e-4,
-        "patience_stage2": 5,
+        "patience_stage2": args.patience_stage2,
         "focal_gamma": 2.0,
         "focal_alpha": 0.5,
         "anomaly_weight": 10.0,

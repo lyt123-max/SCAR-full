@@ -44,6 +44,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--scar-python", default=sys.executable)
     parser.add_argument("--baseline-python", default=sys.executable)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--smoke", action="store_true")
     return parser.parse_args()
 
 
@@ -56,12 +57,13 @@ def build_adapter_command(
     dataset: str,
     seed: int,
     device: str,
+    smoke: bool = False,
 ) -> list[str]:
     if method not in ADAPTERS:
         raise ValueError(f"Unsupported baseline method: {method}.")
     if int(seed) != 42:
         raise ValueError("Formal baseline runs require seed 42.")
-    return [
+    command = [
         str(baseline_python),
         str(Path(__file__).resolve().parent / ADAPTERS[method]),
         "--data-dir",
@@ -75,6 +77,25 @@ def build_adapter_command(
         "--device",
         device,
     ]
+    if smoke:
+        command.extend(
+            {
+                "PaAno": ["--num-iters", "1", "--batch-size", "128"],
+                "MEMTO": ["--epochs", "1"],
+                "PUAD": ["--epochs", "1"],
+                "PGRF-Net": [
+                    "--epochs-stage1",
+                    "1",
+                    "--epochs-stage2",
+                    "1",
+                    "--patience-stage1",
+                    "1",
+                    "--patience-stage2",
+                    "1",
+                ],
+            }[method]
+        )
+    return command
 
 
 def _git_commit(path: Path) -> str:
@@ -139,6 +160,7 @@ def main() -> int:
         dataset=args.dataset,
         seed=args.seed,
         device=args.device,
+        smoke=args.smoke,
     )
     monitor_command = [
         str(args.scar_python),
@@ -169,6 +191,7 @@ def main() -> int:
         "prepare_command": prepare_command,
         "adapter_command": adapter_command,
         "monitor_command": monitor_command,
+        "smoke": bool(args.smoke),
     }
     if args.dry_run:
         print(json.dumps(plan, indent=2, ensure_ascii=False))

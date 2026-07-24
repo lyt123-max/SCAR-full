@@ -59,7 +59,7 @@ for method in PaAno MEMTO PUAD PGRF-Net; do
     --method "${method}" --dataset MSL --seed 42 --device "${DEVICE}" \
     --scar-python "${SCAR_PYTHON}" --baseline-python "${baseline_python}" \
     --source-experiment "${SMOKE_ROOT}/smoke_scar_msl" \
-    --output-dir "${SMOKE_ROOT}/baseline_${method}"
+    --output-dir "${SMOKE_ROOT}/baseline_${method}" --smoke
 done
 
 "${SCAR_PYTHON}" -m unittest discover -s tests -p 'test_*.py'
