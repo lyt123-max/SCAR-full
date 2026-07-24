@@ -140,7 +140,17 @@ class TSBADOutputTests(unittest.TestCase):
     def test_resume_requires_all_score_artifacts(self):
         with tempfile.TemporaryDirectory() as temp:
             experiment_dir = Path(temp)
-            metrics = {"dataset_metadata": {"total_length": 16}}
+            score_metrics = {key: {"roc_auc": 0.5, "pr_auc": 0.4} for key in SCORE_KEYS}
+            metrics = {
+                "dataset_metadata": {"total_length": 16},
+                **score_metrics,
+                "subscores": {
+                    "completion_scale8": {"roc_auc": 0.5, "pr_auc": 0.4},
+                    "completion_scale32": {"roc_auc": 0.5, "pr_auc": 0.4},
+                    "knn_distance": {"roc_auc": 0.5, "pr_auc": 0.4},
+                    "state_novelty": {"roc_auc": 0.5, "pr_auc": 0.4},
+                },
+            }
             (experiment_dir / "test_metrics.json").write_text(json.dumps(metrics), encoding="utf-8")
             for name in _required_test_files([8, 32]):
                 if name.endswith(".npy"):
@@ -150,7 +160,7 @@ class TSBADOutputTests(unittest.TestCase):
             (experiment_dir / "test_scores_cdf_max.npy").unlink()
             self.assertFalse(_is_complete(experiment_dir, "full", [8, 32]))
 
-    def test_collector_outputs_four_fixed_strategies(self):
+    def test_collector_outputs_fusions_and_dynamic_subscores(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             experiment_dir = root / "M" / "eval" / "seed_42" / "001_Toy_id_1_Sensor_tr_200_1st_240"
@@ -172,6 +182,20 @@ class TSBADOutputTests(unittest.TestCase):
                     "source_dataset": "Toy",
                 },
                 **score_metrics,
+                "subscores": {
+                    "knn_distance": {
+                        "vus_pr": 0.5,
+                        "vus_roc": 0.6,
+                        "roc_auc": 0.7,
+                        "pr_auc": 0.8,
+                    },
+                    "state_novelty": {
+                        "vus_pr": 0.4,
+                        "vus_roc": 0.5,
+                        "roc_auc": 0.6,
+                        "pr_auc": 0.7,
+                    },
+                },
             }
             (experiment_dir / "test_metrics.json").write_text(json.dumps(payload), encoding="utf-8")
             (experiment_dir / "run_record.json").write_text(
@@ -188,12 +212,13 @@ class TSBADOutputTests(unittest.TestCase):
             shutil.copytree(experiment_dir, historical_dir)
 
             summary = collect(root, "M", "eval")
-            self.assertEqual(summary["long_rows"], 4)
+            self.assertEqual(summary["long_rows"], 6)
             with (root / "M" / "eval" / "results_long.csv").open(
                 "r", encoding="utf-8-sig", newline=""
             ) as handle:
                 rows = list(csv.DictReader(handle))
-            self.assertEqual({row["score_key"] for row in rows}, set(SCORE_KEYS))
+            expected_scores = {*SCORE_KEYS, "knn_distance", "state_novelty"}
+            self.assertEqual({row["score_key"] for row in rows}, expected_scores)
             primary = [row["score_key"] for row in rows if row["is_primary"] == "1"]
             self.assertEqual(primary, ["cdf_mean"])
             self.assertEqual({row["seed"] for row in rows}, {"42"})
@@ -206,7 +231,7 @@ class TSBADOutputTests(unittest.TestCase):
                 path = root / "M" / "eval" / file_name
                 self.assertTrue(path.is_file())
                 header = path.read_text(encoding="utf-8-sig").splitlines()[0]
-                for score_key in SCORE_KEYS:
+                for score_key in expected_scores:
                     for metric_key in METRIC_KEYS:
                         self.assertIn(f"{score_key}_{metric_key}", header)
 

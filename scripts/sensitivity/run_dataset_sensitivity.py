@@ -16,9 +16,21 @@ import torch
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.experiments.score_outputs import score_metric_groups
+
 RUN_PY = REPO_ROOT / "run.py"
 SUPPORTED_DATASETS = ("GECCO", "GENESIS", "MSL", "SMAP", "PSM", "SWAT", "SMD")
-SUMMARY_SCORE_KEYS = ("cdf_max", "cdf_mean", "cdf_softmax")
+SUMMARY_SCORE_KEYS = (
+    "raw_max",
+    "zscore_mean",
+    "cdf_mean",
+    "cdf_max",
+    "cdf_mean_soft_support",
+    "cdf_softmax",
+)
 SUMMARY_METRIC_KEYS = (
     "roc_auc",
     "pr_auc",
@@ -787,10 +799,8 @@ def read_metric_summary(exp_dir: Path) -> dict[str, Any]:
     payload = metrics if isinstance(metrics, dict) else {}
     score_metrics: dict[str, dict[str, float]] = {}
     flattened: dict[str, Any] = {}
-    for score_key in SUMMARY_SCORE_KEYS:
-        metric_root = payload.get(score_key, {}) if isinstance(payload, dict) else {}
-        if not isinstance(metric_root, dict):
-            metric_root = {}
+    groups = score_metric_groups(payload, require_core=True)
+    for score_key, metric_root in groups.items():
         summary = extract_metric_summary(metric_root)
         score_metrics[score_key] = summary
         for metric_key, metric_value in summary.items():
@@ -861,8 +871,16 @@ def write_summary(
         "vus_roc",
         "vus_pr",
     ]
-    for score_key in SUMMARY_SCORE_KEYS:
-        fieldnames.extend(f"{score_key}_{metric_key}" for metric_key in SUMMARY_METRIC_KEYS)
+    score_metric_fields = sorted(
+        {
+            key
+            for row in rows
+            for key in row
+            if key not in fieldnames
+            and any(key.endswith(f"_{metric}") for metric in SUMMARY_METRIC_KEYS)
+        }
+    )
+    fieldnames.extend(score_metric_fields)
     with csv_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()

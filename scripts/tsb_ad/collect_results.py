@@ -4,10 +4,17 @@ import argparse
 import csv
 import json
 import math
+import sys
 from collections import defaultdict
 from pathlib import Path
 from statistics import fmean
 from typing import Any, Iterable
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.experiments.score_outputs import score_metric_groups
 
 try:
     from .common import (
@@ -110,10 +117,9 @@ def _run_rows(
             record_path = experiment_dir / "run_record.json"
             record = _read_json(record_path) if record_path.exists() else {}
             runtime = _finite(record.get("runtime_seconds"))
-            for score_key in SCORE_KEYS:
-                score_metrics = metrics.get(score_key)
-                if not isinstance(score_metrics, dict):
-                    raise KeyError(f"missing score metrics for {score_key}")
+            for score_key, score_metrics in score_metric_groups(
+                metrics, require_core=True
+            ).items():
                 row: dict[str, Any] = {
                     "edition": edition,
                     "split": split,
@@ -166,6 +172,7 @@ def _wide_rows(
     identity_keys: tuple[str, ...],
     *,
     count_key: str,
+    score_keys: tuple[str, ...],
 ) -> list[dict[str, Any]]:
     groups: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
     for row in long_rows:
@@ -177,7 +184,7 @@ def _wide_rows(
         wide[count_key] = len({(row["file"], row["seed"]) for row in group})
         wide["n_files"] = len({row["file"] for row in group})
         wide["n_seeds"] = len({row["seed"] for row in group})
-        for score_key in SCORE_KEYS:
+        for score_key in score_keys:
             score_rows = [row for row in group if row["score_key"] == score_key]
             for metric_key in METRIC_KEYS:
                 wide[f"{score_key}_{metric_key}"] = _mean(row[metric_key] for row in score_rows)
@@ -185,7 +192,9 @@ def _wide_rows(
     return output
 
 
-def _macro_rows(long_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _macro_rows(
+    long_rows: list[dict[str, Any]], score_keys: tuple[str, ...]
+) -> list[dict[str, Any]]:
     dataset_groups: dict[tuple[str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in long_rows:
         dataset_groups[(row["edition"], row["split"], row["dataset"], row["score_key"])].append(row)
@@ -213,7 +222,7 @@ def _macro_rows(long_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "split": split,
             "n_datasets": len({row["dataset"] for row in group}),
         }
-        for score_key in SCORE_KEYS:
+        for score_key in score_keys:
             score_rows = [row for row in group if row["score_key"] == score_key]
             for metric_key in METRIC_KEYS:
                 wide[f"{score_key}_{metric_key}"] = _mean(row[metric_key] for row in score_rows)
@@ -231,8 +240,13 @@ def collect(
     split = normalize_split(split)
     long_rows, failures = _run_rows(artifact_root, edition, split, seed)
     output_dir = artifact_root / edition / split
+    discovered = {str(row["score_key"]) for row in long_rows}
+    score_keys = tuple(
+        [key for key in SCORE_KEYS if key in discovered]
+        + sorted(discovered.difference(SCORE_KEYS))
+    )
     identity_fields = ["edition", "split", "dataset", "file", "seed"]
-    metric_fields = [f"{score}_{metric}" for score in SCORE_KEYS for metric in METRIC_KEYS]
+    metric_fields = [f"{score}_{metric}" for score in score_keys for metric in METRIC_KEYS]
 
     _write_csv(
         output_dir / "results_long.csv",
@@ -253,10 +267,19 @@ def collect(
             "coverage",
         ],
     )
-    per_series = _wide_rows(long_rows, tuple(identity_fields), count_key="n_runs")
-    by_dataset = _wide_rows(long_rows, ("edition", "split", "dataset"), count_key="n_runs")
-    official = _wide_rows(long_rows, ("edition", "split"), count_key="n_runs")
-    macro = _macro_rows(long_rows)
+    per_series = _wide_rows(
+        long_rows, tuple(identity_fields), count_key="n_runs", score_keys=score_keys
+    )
+    by_dataset = _wide_rows(
+        long_rows,
+        ("edition", "split", "dataset"),
+        count_key="n_runs",
+        score_keys=score_keys,
+    )
+    official = _wide_rows(
+        long_rows, ("edition", "split"), count_key="n_runs", score_keys=score_keys
+    )
+    macro = _macro_rows(long_rows, score_keys)
     _write_csv(output_dir / "results_per_series_wide.csv", per_series, identity_fields + ["n_runs", "n_files", "n_seeds"] + metric_fields)
     _write_csv(output_dir / "results_by_dataset_wide.csv", by_dataset, ["edition", "split", "dataset", "n_runs", "n_files", "n_seeds"] + metric_fields)
     _write_csv(output_dir / "results_official_average_wide.csv", official, ["edition", "split", "n_runs", "n_files", "n_seeds"] + metric_fields)

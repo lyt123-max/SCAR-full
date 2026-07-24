@@ -10,6 +10,8 @@ from typing import Any
 
 import numpy as np
 
+from scripts.experiments.score_outputs import score_metric_groups
+
 
 def canonical_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -103,6 +105,7 @@ def artifact_is_complete(spec: RunSpec) -> bool:
         return False
     array_shapes: dict[str, tuple[int, ...]] = {}
     npz_shapes: dict[str, dict[str, tuple[int, ...]]] = {}
+    json_payloads: dict[str, object] = {}
     for relative in spec.required_artifacts:
         path = spec.artifact_dir / relative
         if not path.is_file() or path.stat().st_size <= 0:
@@ -110,7 +113,7 @@ def artifact_is_complete(spec: RunSpec) -> bool:
         suffix = path.suffix.lower()
         if suffix == ".json":
             try:
-                json.loads(path.read_text(encoding="utf-8"))
+                json_payloads[path.name] = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, UnicodeDecodeError, json.JSONDecodeError):
                 return False
         elif suffix == ".npy":
@@ -137,6 +140,11 @@ def artifact_is_complete(spec: RunSpec) -> bool:
     if "scores.npy" in array_shapes and "labels.npy" in array_shapes:
         if math.prod(array_shapes["scores.npy"]) != math.prod(array_shapes["labels.npy"]):
             return False
+    if "scores.npy" in array_shapes:
+        expected_size = math.prod(array_shapes["scores.npy"])
+        for name, shape in array_shapes.items():
+            if name.startswith("scores_") and math.prod(shape) != expected_size:
+                return False
     diagnostic_shapes = npz_shapes.get("test_diagnostic_scores.npz", {})
     if "test_scores_selected.npy" in array_shapes and "labels" in diagnostic_shapes:
         expected_size = math.prod(array_shapes["test_scores_selected.npy"])
@@ -157,6 +165,40 @@ def artifact_is_complete(spec: RunSpec) -> bool:
                 return False
             if row_count != math.prod(array_shapes["test_sequence_scores_selected.npy"]):
                 return False
+        expected_size = math.prod(array_shapes["test_sequence_scores_selected.npy"])
+        for name, shape in array_shapes.items():
+            if name.startswith("test_sequence_scores_") and math.prod(shape) != expected_size:
+                return False
+    metrics = json_payloads.get("test_metrics.json")
+    has_scar_score_contract = any(
+        name in array_shapes
+        for name in ("test_scores_raw_max.npy", "test_sequence_scores_raw_max.npy")
+    )
+    if has_scar_score_contract:
+        if not isinstance(metrics, dict):
+            return False
+        try:
+            groups = score_metric_groups(metrics, require_core=True)
+        except KeyError:
+            return False
+        expected_subscores = {
+            name.removeprefix("test_scores_").removesuffix(".npy")
+            for name in array_shapes
+            if name.startswith("test_scores_completion_scale")
+            or name in {"test_scores_knn_distance.npy", "test_scores_state_novelty.npy"}
+        }
+        expected_subscores.update(
+            name.removeprefix("test_sequence_scores_").removesuffix(".npy")
+            for name in array_shapes
+            if name.startswith("test_sequence_scores_completion_scale")
+            or name
+            in {
+                "test_sequence_scores_knn_distance.npy",
+                "test_sequence_scores_state_novelty.npy",
+            }
+        )
+        if not expected_subscores.issubset(groups):
+            return False
     return True
 
 

@@ -152,6 +152,15 @@ SEQUENCE_CORE_REQUIRED = (
     "cdf_fusion.json",
     "zscore_fusion.json",
     "test_sequence_scores_selected.npy",
+    "test_sequence_scores_raw_max.npy",
+    "test_sequence_scores_zscore_mean.npy",
+    "test_sequence_scores_cdf_mean.npy",
+    "test_sequence_scores_cdf_max.npy",
+    "test_sequence_scores_knn_distance.npy",
+    "test_sequence_scores_state_novelty.npy",
+    "test_sequence_scores_completion_scale8.npy",
+    "test_sequence_scores_completion_scale32.npy",
+    "test_sequence_scores.npz",
     "test_sequence_scores.csv",
     "test_metrics.json",
     "resource_metrics.json",
@@ -972,6 +981,7 @@ def _strategy_task(
     extra_config: dict[str, Any] | None = None,
     dependencies: tuple[str, ...] = (),
 ) -> RunSpec:
+    patch_sizes = tuple((extra_config or {}).get("patch_sizes", (8, 32)))
     config = {
         "source_experiment": str(source_experiment),
         "strategy": strategy,
@@ -1003,6 +1013,14 @@ def _strategy_task(
         ),
         required=(
             "scores.npy",
+            "scores_raw_max.npy",
+            "scores_zscore_mean.npy",
+            "scores_cdf_mean.npy",
+            "scores_cdf_max.npy",
+            "scores_knn_distance.npy",
+            "scores_state_novelty.npy",
+            *(f"scores_completion_scale{size}.npy" for size in patch_sizes),
+            "diagnostics.npz",
             "metrics.json",
             "run_manifest.json",
             f"retrieval_{strategy}.npz",

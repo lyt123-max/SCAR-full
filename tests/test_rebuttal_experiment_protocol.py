@@ -85,6 +85,19 @@ class FormalProtocolTests(unittest.TestCase):
         tasks = build_p0_tasks(Path("/artifacts"), python_exe="python")
         tep = next(task for task in tasks if task.group == "tep")
         self.assertIn("test_sequence_scores_selected.npy", tep.required_artifacts)
+        for score_name in (
+            "raw_max",
+            "zscore_mean",
+            "cdf_mean",
+            "cdf_max",
+            "completion_scale8",
+            "completion_scale32",
+            "knn_distance",
+            "state_novelty",
+        ):
+            self.assertIn(
+                f"test_sequence_scores_{score_name}.npy", tep.required_artifacts
+            )
         self.assertNotIn("test_scores_selected.npy", tep.required_artifacts)
         self.assertEqual(tep.metadata["environment"]["FORMAL_REBUTTAL"], "1")
         self.assertEqual(tep.metadata["environment"]["MAX_TEST_SEQUENCES"], "0")

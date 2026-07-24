@@ -12,6 +12,12 @@ from typing import Any
 
 import numpy as np
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.experiments.score_outputs import score_metric_groups
+
 from collect_results import collect
 from common import (
     FORMAL_SEED,
@@ -72,6 +78,7 @@ def _test_artifact_error(experiment_dir: Path, patch_sizes: list[int]) -> str | 
         return f"missing artifacts: {', '.join(missing)}"
     try:
         metrics = json.loads((experiment_dir / "test_metrics.json").read_text(encoding="utf-8"))
+        groups = score_metric_groups(metrics, require_core=True)
         total_length = int(metrics["dataset_metadata"]["total_length"])
         if total_length < 1:
             return "dataset_metadata.total_length must be positive"
@@ -84,6 +91,13 @@ def _test_artifact_error(experiment_dir: Path, patch_sizes: list[int]) -> str | 
         with np.load(experiment_dir / "test_diagnostic_scores.npz", allow_pickle=False) as payload:
             if "labels" not in payload or payload["labels"].shape != (total_length,):
                 return "test_diagnostic_scores.npz labels do not match the full series length"
+        expected_subscores = {
+            "knn_distance",
+            "state_novelty",
+            *(f"completion_scale{size}" for size in patch_sizes),
+        }
+        if not expected_subscores.issubset(groups):
+            return f"test_metrics.json missing subscore metrics: {sorted(expected_subscores - groups.keys())}"
     except Exception as exc:
         return f"invalid test artifacts: {exc}"
     return None

@@ -37,8 +37,11 @@
 - [ ] 完整配置与固定 seed `42`；
 - [ ] Stage-A checkpoint、Stage-B memory/index 和校准产物；
 - [ ] `memory_meta.json`；机制审计运行还须保存 full audit NPZ；
-- [ ] 与测试标签等长的逐点 anomaly scores；
-- [ ] AUROC、AP 及相应协议要求的其他指标；
+- [ ] 与测试标签等长的逐点 anomaly scores：`raw_max`、`zscore_mean`、`cdf_mean`、
+  `cdf_max`，以及全部 `completion_scale*`、`knn_distance`、`state_novelty` 和启用时的
+  `soft_support_score`；序列协议保存对应的逐序列分数；
+- [ ] 上述每个分数各自的 AUROC、AP 及相应协议要求的 F1、VUS、Affiliation、Range
+  等指标；`cdf_mean` 固定为主结果，但不得只输出 selected 指标；
 - [ ] `resource_metrics.json`、模型大小、memory 大小和总产物大小；
 - [ ] 失败时的 manifest、异常类型、最后 checkpoint 和可续跑状态。
 

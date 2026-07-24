@@ -123,6 +123,8 @@ def main() -> int:
         for name, score in metric_sources.items()
     }
     np.save(output_dir / "scores.npy", selected)
+    for name, values in metric_sources.items():
+        np.save(output_dir / f"scores_{name}.npy", values)
     np.save(output_dir / "coverage_count.npy", test_count)
     np.savez_compressed(output_dir / "diagnostics.npz", **test_diags)
     payload = {
@@ -133,6 +135,9 @@ def main() -> int:
         "selected_score_key": config.evaluation_score_key,
         "selected": metrics["selected"],
         "scores": metrics,
+        "score_files": {
+            name: f"scores_{name}.npy" for name in metric_sources
+        },
         "runtime_seconds": time.perf_counter() - started,
     }
     (output_dir / "metrics.json").write_text(

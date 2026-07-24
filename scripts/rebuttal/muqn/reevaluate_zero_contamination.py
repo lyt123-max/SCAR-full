@@ -56,7 +56,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--fold", type=int, required=True)
     parser.add_argument("--n-folds", type=int, default=3)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--score-file", default="test_scores_selected.npy")
+    parser.add_argument(
+        "--score-file",
+        default=None,
+        help="Legacy single-score override; formal runs evaluate every SCAR score.",
+    )
     parser.add_argument("--fold-manifest", type=Path, default=None)
     parser.add_argument("--output-dir", type=Path, required=True)
     return parser.parse_args()
@@ -95,15 +99,48 @@ def main() -> int:
             [tuple(map(int, event)) for event in fold["injection_events"]]
             for fold in protocol["folds"]
         ]
-    scores = np.load(experiment_dir / args.score_file)
-    metrics, mask = masked_binary_metrics(labels, scores, folds[args.fold])
+    test_metrics = json.loads(
+        (experiment_dir / "test_metrics.json").read_text(encoding="utf-8")
+    )
+    score_files = test_metrics["score_files"]
+    if args.score_file is not None:
+        requested_files = {"selected": args.score_file}
+    else:
+        score_names = [
+            "selected",
+            "raw_max",
+            "zscore_mean",
+            "cdf_mean",
+            "cdf_max",
+            *sorted(test_metrics.get("subscores", {})),
+        ]
+        requested_files = {
+            name: score_files[name] for name in dict.fromkeys(score_names)
+        }
+    score_metrics = {}
+    mask = None
+    for score_name, filename in requested_files.items():
+        metrics, current_mask = masked_binary_metrics(
+            labels,
+            np.load(experiment_dir / filename),
+            folds[args.fold],
+        )
+        score_metrics[score_name] = metrics
+        if mask is None:
+            mask = current_mask
+        elif not np.array_equal(mask, current_mask):
+            raise RuntimeError("Score-specific evaluation masks differ.")
+    if mask is None:
+        raise RuntimeError("No SCAR score files were selected for evaluation.")
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     np.save(args.output_dir / "evaluation_mask.npy", mask)
     payload = {
         "schema_version": 1,
         "source_experiment": str(experiment_dir),
-        "score_file": args.score_file,
+        "score_file": requested_files["selected"],
+        "score_files": requested_files,
+        "selected_score_key": test_metrics.get("selected_score_key", "cdf_mean"),
         "fold": int(args.fold),
         "n_folds": int(args.n_folds),
         "seed": int(args.seed),
@@ -111,7 +148,8 @@ def main() -> int:
         "frozen_fold_manifest": (
             str(args.fold_manifest.resolve()) if args.fold_manifest is not None else None
         ),
-        "metrics": metrics,
+        "metrics": score_metrics["selected"],
+        "score_metrics": score_metrics,
     }
     (args.output_dir / "heldout_metrics.json").write_text(
         json.dumps(payload, indent=2, ensure_ascii=False),

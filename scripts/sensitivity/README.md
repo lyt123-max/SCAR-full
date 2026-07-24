@@ -9,7 +9,7 @@ This folder contains a reproducible sensitivity-analysis workflow for CoReM-AD o
 - Each single-dataset or multi-dataset run now gets a date tag by default, so repeated sensitivity batches are easy to distinguish later.
 - The default result folders now also include an explicit `sensitivity` marker such as `msl_sensitivity`, so they do not get confused with main experiments or ablations.
 - Stores a machine-readable summary in `csv/json`.
-- The summary now records three evaluation views for each sweep point: `cdf_max`, `cdf_mean`, and `cdf_softmax`.
+- The summary records `raw_max`, `zscore_mean`, `cdf_mean`, `cdf_max`, optional CDF variants, and every available diagnostic subscore for each sweep point.
 - The summary now includes `Affiliated-Precision`, `Affiliated-Recall`, `Range-Precision`, and `Range-Recall` in addition to the F1/AUC metrics.
 - Draws paper-style main/appendix figures and exports both `png` and `pdf`.
 

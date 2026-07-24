@@ -551,7 +551,7 @@ python run.py --stage full --data_format tsb_ad \
 | 脚本/目录 | 功能 |
 | --- | --- |
 | `run_benchmark.py` | 按 edition、split 和 seed 为每个 CSV 启动独立子进程，记录日志、耗时、失败状态并支持断点续跑；未指定 seed 时正式默认只运行 `42`。 |
-| `collect_results.py` | 固定汇总四种正式融合策略，默认只收集 `seed_42` 并生成长表以及逐序列、来源数据集、官方总体和数据集 macro-average 四张宽表；`--all-seeds` 仅用于历史产物审计。 |
+| `collect_results.py` | 固定汇总四种正式融合策略和全部诊断子分数，默认只收集 `seed_42` 并生成长表以及逐序列、来源数据集、官方总体和数据集 macro-average 四张宽表；`--all-seeds` 仅用于历史产物审计。 |
 | `validate_setup.py` | 校验本地 M/U 文件清单、官方 split 数量和 CSV 通道结构。 |
 | `common.py` | 维护文件名协议、官方清单映射和数据目录解析。 |
 | `manifests/` | TSB-AD 官方 M/U all、tuning、eval 与 eval-full 文件清单。 |
@@ -586,9 +586,9 @@ python run.py --stage full --data_format tsb_ad \
 | `faiss_state.index` | Faiss 状态索引，可用时生成。 |
 | `cdf_fusion.npz/json` | CDF-PIT 融合器。 |
 | `zscore_fusion.json` | z-score mean 融合器。 |
-| `test_diagnostic_scores.npz` | 测试诊断子分数。 |
-| `test_scores*.npy/csv` | 测试异常分数。 |
-| `test_metrics.json` | 测试指标。 |
+| `test_diagnostic_scores.npz` | 测试诊断子分数及标签。 |
+| `test_scores*.npy/csv` | `raw_max`、`zscore_mean`、`cdf_mean`、`cdf_max` 及全部诊断子分数的逐点或逐序列结果。 |
+| `test_metrics.json` | selected、四种正式融合以及全部诊断子分数的完整指标。 |
 | `score_timeline*.png`、`*_distribution.png` | 分数时间线和分布图。 |
 
 TSB-AD 每条序列的目录固定为
@@ -621,7 +621,7 @@ split 目录额外生成 `results_long.csv` 和四张论文宽表；`run_record.
 
 TEP selected 历史序列结果可保留原评估字段；full 的故障序列均为全正类，因此不报告 `AUROC`、`AUPRC` 和 `F1`。full 重点报告窗口加权机制指标及对应的序列等权指标，避免 158 条完整序列与 10 条短序列的长度差异改变结论。
 
-论文表格和脚本中当前默认主报告分数为 `cdf_mean`，除非实验明确比较 A3 融合策略。TSB-AD 轨道对 `raw_max`、`zscore_mean`、`cdf_mean`、`cdf_max` 分别计算 VUS-PR、VUS-ROC、AUROC 和 AP，并同时汇报运行时间与有效评分覆盖率。`cdf_mean` 是预先固定的 SCAR 主结果，其余三种是正式融合对照；不得逐 CSV、逐来源数据集或逐指标挑选最优策略。
+论文表格和脚本中当前默认主报告分数为 `cdf_mean`，但所有正式 SCAR 运行必须同时保存并汇总 `raw_max`、`zscore_mean`、`cdf_mean`、`cdf_max` 以及 `completion_scale*`、`knn_distance`、`state_novelty` 和启用时的 `soft_support_score`。每个分数均输出其适用的 AUROC、AP、F1、VUS、Affiliation 和 Range 指标，不得只保留 selected 指标。TSB-AD 对上述每个可用分数生成逐序列、来源数据集、官方总体和 dataset-macro 表。`cdf_mean` 仍是预先固定的主结果，其余分数用于诊断和融合对照；不得逐 CSV、逐来源数据集或逐指标挑选最优策略。
 
 ## 12. 维护清单
 

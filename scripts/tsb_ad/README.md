@@ -8,7 +8,7 @@
 - 训练、memory、CDF 与 Z-score 统计量只使用该训练前缀。
 - 推理和评估范围是完整 CSV，标签不参与训练、归一化、融合拟合或 VUS window 估计。
 - VUS window 使用 TSB-AD 官方 rank-1 ACF 规则，由第一信号通道估计。
-- 一次推理固定报告 `raw_max`、`zscore_mean`、`cdf_mean`、`cdf_max`；`cdf_mean` 是预先指定的 SCAR 主结果。
+- 一次推理固定报告 `raw_max`、`zscore_mean`、`cdf_mean`、`cdf_max`，并报告全部 `completion_scale*`、`knn_distance`、`state_novelty` 和启用时的 `soft_support_score`；`cdf_mean` 是预先指定的 SCAR 主结果。
 - 禁止按 CSV、来源数据集或指标选择表现最好的融合策略。
 
 ## 安装评估依赖
@@ -97,4 +97,4 @@ python scripts/tsb_ad/collect_results.py --edition M --split eval
 - `results_dataset_macro_average_wide.csv`
 - `collection_failures.csv`
 
-长表逐文件、逐 seed、逐融合策略保存 VUS-PR、VUS-ROC、AUROC、AP、运行时间和评分覆盖率。正式表只读取 seed `42`；collector 继续兼容历史 `seed_*` 目录。四张宽表分别用于逐序列、来源数据集平均、全部序列官方平均和来源数据集 macro-average。
+长表逐文件、逐 seed、逐融合策略/子分数保存 VUS-PR、VUS-ROC、AUROC、AP、运行时间和评分覆盖率。正式表只读取 seed `42`；collector 继续兼容历史 `seed_*` 目录。四张宽表分别用于逐序列、来源数据集平均、全部序列官方平均和来源数据集 macro-average。

@@ -5,9 +5,16 @@ import csv
 import json
 import math
 import shutil
+import sys
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Iterable
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.experiments.score_outputs import flatten_score_metrics
 
 
 MAIN_DATASETS = ("MSL", "PSM", "SMAP", "SMD", "SWAT")
@@ -43,22 +50,9 @@ def _flatten(value: Any, prefix: str = "") -> dict[str, Any]:
     return result
 
 
-def _metric_row(path: Path) -> dict[str, Any]:
-    flat = _flatten(_load(path))
-
-    def first(names: Iterable[str]) -> Any:
-        for name in names:
-            for key, value in flat.items():
-                if key == name or key.endswith(f".{name}"):
-                    return value
-        return None
-
+def _metric_row(path: Path, *, require_core: bool = True) -> dict[str, Any]:
     return {
-        "roc_auc": first(("selected.roc_auc", "roc_auc", "auroc")),
-        "pr_auc": first(("selected.pr_auc", "pr_auc", "average_precision", "ap")),
-        "vus_roc": first(("selected.vus_roc", "vus_roc")),
-        "vus_pr": first(("selected.vus_pr", "vus_pr")),
-        "best_f1": first(("selected.best_f1", "best_f1", "f1")),
+        **flatten_score_metrics(_load(path), require_core=require_core),
         "metric_file": str(path),
     }
 
@@ -155,7 +149,11 @@ def collect(artifact_root: Path, output_dir: Path, *, strict: bool) -> dict[str,
             resource = required(experiment / "resource_metrics.json")
             if metrics:
                 baseline_rows.append(
-                    {"method": method, "dataset": dataset, **_metric_row(metrics)}
+                    {
+                        "method": method,
+                        "dataset": dataset,
+                        **_metric_row(metrics, require_core=False),
+                    }
                 )
             if timing and resource:
                 efficiency_rows.append(
@@ -200,14 +198,25 @@ def collect(artifact_root: Path, output_dir: Path, *, strict: bool) -> dict[str,
     ):
         payload = _load(protocol_path)
         heldout = payload.get("heldout_point_metrics", {})
+        heldout_scores = payload.get("heldout_score_metrics", {})
+        score_columns = (
+            flatten_score_metrics(
+                {
+                    "selected_score_key": payload.get("selected_score_key", "cdf_mean"),
+                    "selected": heldout,
+                    **heldout_scores,
+                }
+            )
+            if heldout_scores
+            else {"roc_auc": heldout.get("roc_auc"), "pr_auc": heldout.get("pr_auc")}
+        )
         e10_rows.append(
             {
                 "dataset": protocol_path.parent.name.split("_")[2].upper(),
                 "fold": payload.get("fold"),
                 "contamination_ratio": payload.get("contamination_ratio_requested"),
                 "clean_ratio": _load(protocol_path.parent / "config.json").get("clean_ratio"),
-                "roc_auc": heldout.get("roc_auc"),
-                "pr_auc": heldout.get("pr_auc"),
+                **score_columns,
                 "protocol_file": str(protocol_path),
             }
         )
@@ -220,6 +229,18 @@ def collect(artifact_root: Path, output_dir: Path, *, strict: bool) -> dict[str,
     ):
         payload = _load(heldout_path)
         metrics = payload.get("metrics", {})
+        all_scores = payload.get("score_metrics", {})
+        score_columns = (
+            flatten_score_metrics(
+                {
+                    "selected_score_key": payload.get("selected_score_key", "cdf_mean"),
+                    "selected": metrics,
+                    **all_scores,
+                }
+            )
+            if all_scores
+            else {"roc_auc": metrics.get("roc_auc"), "pr_auc": metrics.get("pr_auc")}
+        )
         parts = heldout_path.parent.name.split("_")
         zero_rows.append(
             {
@@ -227,8 +248,7 @@ def collect(artifact_root: Path, output_dir: Path, *, strict: bool) -> dict[str,
                 "fold": payload.get("fold"),
                 "contamination_ratio": 0.0,
                 "purification": parts[4],
-                "roc_auc": metrics.get("roc_auc"),
-                "pr_auc": metrics.get("pr_auc"),
+                **score_columns,
                 "protocol_file": str(heldout_path),
             }
         )
@@ -259,15 +279,24 @@ def collect(artifact_root: Path, output_dir: Path, *, strict: bool) -> dict[str,
             }
             track_rows.append(row)
             tsb_rows.append(row)
+        metric_keys = sorted(
+            {
+                key
+                for row in track_rows
+                for key, value in row.items()
+                if key not in {"edition", "split", "series", "metric_file", "selected_score_key"}
+                and isinstance(value, (int, float))
+            }
+        )
         tsb_summary_rows.append(
             {
                 "edition": edition,
                 "split": split,
                 "series_count": len(track_rows),
-                "mean_roc_auc": _finite_mean(row["roc_auc"] for row in track_rows),
-                "mean_pr_auc": _finite_mean(row["pr_auc"] for row in track_rows),
-                "mean_vus_roc": _finite_mean(row["vus_roc"] for row in track_rows),
-                "mean_vus_pr": _finite_mean(row["vus_pr"] for row in track_rows),
+                **{
+                    f"mean_{key}": _finite_mean(row.get(key) for row in track_rows)
+                    for key in metric_keys
+                },
             }
         )
 

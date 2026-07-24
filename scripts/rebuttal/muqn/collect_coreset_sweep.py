@@ -3,9 +3,16 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.experiments.score_outputs import flatten_score_metrics
 
 
 DATASETS = ("MSL", "PSM", "SMAP", "SMD", "SWAT")
@@ -42,13 +49,9 @@ def candidate_recall(oracle_raw_starts: np.ndarray, retained: set[int]) -> float
     return float(np.mean([int(value) in retained for value in oracle[valid]]))
 
 
-def _selected_metrics(experiment: Path) -> dict:
+def _all_metrics(experiment: Path) -> dict:
     payload = json.loads((experiment / "test_metrics.json").read_text(encoding="utf-8"))
-    selected = payload.get("selected", payload)
-    return {
-        "roc_auc": selected.get("roc_auc", selected.get("point_roc_auc")),
-        "pr_auc": selected.get("pr_auc", selected.get("point_pr_auc")),
-    }
+    return flatten_score_metrics(payload, require_core=True)
 
 
 def _resource(experiment: Path) -> dict:
@@ -98,7 +101,7 @@ def main() -> None:
                         oracle_starts, retained_raw_starts(experiment)
                     ),
                     "bank_bytes": bank_bytes,
-                    **_selected_metrics(experiment),
+                    **_all_metrics(experiment),
                     **_resource(experiment),
                 }
             )

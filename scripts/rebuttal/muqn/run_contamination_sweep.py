@@ -338,14 +338,37 @@ def main() -> None:
             trainer.run_stage_b(memory_loader=memory_loader)
             trainer.run_test()
 
-            selected_scores = np.load(target_dir / "test_scores_selected.npy")
-            heldout_metrics = binary_point_metrics(
-                raw_bundle.test_labels,
-                selected_scores,
-                evaluation_mask=evaluation_mask,
+            test_metrics = json.loads(
+                (target_dir / "test_metrics.json").read_text(encoding="utf-8")
             )
+            score_files = test_metrics["score_files"]
+            score_names = [
+                "selected",
+                "raw_max",
+                "zscore_mean",
+                "cdf_mean",
+                "cdf_max",
+                *sorted(test_metrics.get("subscores", {})),
+            ]
+            heldout_score_metrics = {}
+            for score_name in dict.fromkeys(score_names):
+                score_path = target_dir / score_files[score_name]
+                heldout_score_metrics[score_name] = binary_point_metrics(
+                    raw_bundle.test_labels,
+                    np.load(score_path),
+                    evaluation_mask=evaluation_mask,
+                )
+            heldout_metrics = heldout_score_metrics["selected"]
             manifest["heldout_point_metrics"] = heldout_metrics
-            manifest["score_file"] = str(target_dir / "test_scores_selected.npy")
+            manifest["heldout_score_metrics"] = heldout_score_metrics
+            manifest["selected_score_key"] = test_metrics.get(
+                "selected_score_key", "cdf_mean"
+            )
+            manifest["score_files"] = {
+                name: str(target_dir / score_files[name])
+                for name in heldout_score_metrics
+            }
+            manifest["score_file"] = manifest["score_files"]["selected"]
             (target_dir / "contamination_protocol.json").write_text(
                 json.dumps(manifest, indent=2, ensure_ascii=False),
                 encoding="utf-8",

@@ -3,7 +3,14 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import sys
 from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.experiments.score_outputs import flatten_score_metrics
 
 
 DATASETS = ("MSL", "PSM", "SMAP", "SMD", "SWAT")
@@ -25,21 +32,18 @@ SYNTHETIC = (
 )
 
 
-def _metrics(path: Path) -> tuple[float, float]:
+def _metrics(path: Path) -> dict:
     payload = json.loads(path.read_text(encoding="utf-8"))
-    selected = payload.get("selected", payload)
-    if "selected" in selected and isinstance(selected["selected"], dict):
-        selected = selected["selected"]
-    roc = selected.get("roc_auc", selected.get("point_roc_auc"))
-    ap = selected.get("pr_auc", selected.get("point_pr_auc"))
-    if roc is None or ap is None:
-        raise KeyError(f"Cannot locate AUROC/AP in {path}.")
-    return float(roc), float(ap)
+    return flatten_score_metrics(payload, require_core=True)
 
 
 def _write(path: Path, rows: list[dict]) -> None:
+    fieldnames = list(rows[0])
+    fieldnames.extend(
+        sorted({key for row in rows for key in row}.difference(fieldnames))
+    )
     with path.open("w", encoding="utf-8-sig", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
 
@@ -61,14 +65,13 @@ def main() -> None:
         for length in WINDOWS:
             for strategy in ("global", "context_only", "full"):
                 name = f"scar_e29_{dataset.lower()}_l{length}_{strategy}"
-                roc, ap = _metrics(root / name / "metrics.json")
+                metrics = _metrics(root / name / "metrics.json")
                 e29.append(
                     {
                         "dataset": dataset,
                         "window_length": length,
                         "strategy": strategy,
-                        "roc_auc": roc,
-                        "pr_auc": ap,
+                        **metrics,
                     }
                 )
 
@@ -77,7 +80,7 @@ def main() -> None:
         for patch in PATCHES:
             for strategy in ("global", "full"):
                 name = f"scar_e30_{dataset.lower()}_p{patch}_seed42_{strategy}"
-                roc, ap = _metrics(root / name / "metrics.json")
+                metrics = _metrics(root / name / "metrics.json")
                 e30.append(
                     {
                         "dataset": dataset,
@@ -88,12 +91,11 @@ def main() -> None:
                         ),
                         "patch_size": str(patch),
                         "strategy": strategy,
-                        "roc_auc": roc,
-                        "pr_auc": ap,
+                        **metrics,
                     }
                 )
         name = f"scar_e30_{dataset.lower()}_multiscale_full"
-        roc, ap = _metrics(root / name / "metrics.json")
+        metrics = _metrics(root / name / "metrics.json")
         e30.append(
             {
                 "dataset": dataset,
@@ -104,8 +106,7 @@ def main() -> None:
                 ),
                 "patch_size": "8+32",
                 "strategy": "full",
-                "roc_auc": roc,
-                "pr_auc": ap,
+                **metrics,
             }
         )
     macro = []
@@ -121,14 +122,24 @@ def main() -> None:
                 ]
                 if not rows:
                     continue
+                metric_keys = sorted(
+                    key
+                    for key in rows[0]
+                    if key == "roc_auc"
+                    or key == "pr_auc"
+                    or key.endswith("_roc_auc")
+                    or key.endswith("_pr_auc")
+                )
                 macro.append(
                     {
                         "anomaly_type": anomaly_type,
                         "patch_size": patch,
                         "strategy": strategy,
                         "series_count": len(rows),
-                        "macro_roc_auc": sum(row["roc_auc"] for row in rows) / len(rows),
-                        "macro_pr_auc": sum(row["pr_auc"] for row in rows) / len(rows),
+                        **{
+                            f"macro_{key}": sum(float(row[key]) for row in rows) / len(rows)
+                            for key in metric_keys
+                        },
                     }
                 )
 
