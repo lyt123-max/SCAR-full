@@ -17,6 +17,7 @@ if str(REPO_ROOT) not in sys.path:
 from coremad import CoReMADConfig, CoReMADTrainer
 from coremad.data import build_loader
 from coremad.evaluation import binary_point_metrics
+from scripts.experiments.score_outputs import score_metric_groups
 from scripts.rebuttal.muqn.contamination import (
     event_evaluation_mask,
     event_window_starts,
@@ -358,6 +359,12 @@ def main() -> None:
                     np.load(score_path),
                     evaluation_mask=evaluation_mask,
                 )
+            score_metric_groups(
+                {"scores": heldout_score_metrics},
+                require_core=True,
+                require_report_metrics=True,
+                require_finite_report_metrics=True,
+            )
             heldout_metrics = heldout_score_metrics["selected"]
             manifest["heldout_point_metrics"] = heldout_metrics
             manifest["heldout_score_metrics"] = heldout_score_metrics

@@ -35,20 +35,28 @@ def _point_adjusted_metrics(labels: np.ndarray, scores: np.ndarray) -> dict[str,
     segment_max = np.asarray([scores[start:end].max() for start, end in segments])
     segment_length = np.asarray([end - start for start, end in segments], dtype=np.float64)
     positive_points = float(labels.sum())
-    best_f1 = -1.0
-    best_threshold = float("nan")
-    for threshold in np.unique(scores):
-        false_positive = float(
-            normal_sorted.size - np.searchsorted(normal_sorted, threshold, side="left")
-        )
-        true_positive = float(segment_length[segment_max >= threshold].sum())
-        precision = true_positive / max(true_positive + false_positive, 1e-12)
-        recall = true_positive / max(positive_points, 1e-12)
-        f1 = 2.0 * precision * recall / max(precision + recall, 1e-12)
-        if f1 > best_f1:
-            best_f1 = float(f1)
-            best_threshold = float(threshold)
-    return {"pa_best_f1": best_f1, "pa_best_threshold": best_threshold}
+    thresholds = np.unique(scores.astype(np.float64))
+    false_positive = normal_sorted.size - np.searchsorted(
+        normal_sorted, thresholds, side="left"
+    )
+
+    segment_order = np.argsort(segment_max, kind="mergesort")
+    sorted_segment_max = segment_max[segment_order]
+    sorted_segment_length = segment_length[segment_order]
+    prefix_length = np.concatenate(
+        [np.zeros(1, dtype=np.float64), np.cumsum(sorted_segment_length)]
+    )
+    first_detected = np.searchsorted(sorted_segment_max, thresholds, side="left")
+    true_positive = positive_points - prefix_length[first_detected]
+
+    precision = true_positive / np.maximum(true_positive + false_positive, 1e-12)
+    recall = true_positive / max(positive_points, 1e-12)
+    f1 = 2.0 * precision * recall / np.maximum(precision + recall, 1e-12)
+    best_index = int(np.nanargmax(f1))
+    return {
+        "pa_best_f1": float(f1[best_index]),
+        "pa_best_threshold": float(thresholds[best_index]),
+    }
 
 
 def _temporal_metrics(labels: np.ndarray, scores: np.ndarray) -> dict[str, float]:

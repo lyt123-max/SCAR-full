@@ -82,6 +82,7 @@ def _test_artifact_error(experiment_dir: Path, patch_sizes: list[int]) -> str | 
             metrics,
             require_core=True,
             require_report_metrics=True,
+            require_finite_report_metrics=True,
         )
         total_length = int(metrics["dataset_metadata"]["total_length"])
         if total_length < 1:

@@ -15,6 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from scripts.experiments.score_outputs import score_metric_groups
 from scripts.rebuttal.muqn.contamination import (
     Event,
     event_evaluation_mask,
@@ -132,6 +133,12 @@ def main() -> int:
             raise RuntimeError("Score-specific evaluation masks differ.")
     if mask is None:
         raise RuntimeError("No SCAR score files were selected for evaluation.")
+    score_metric_groups(
+        {"scores": score_metrics},
+        require_core=True,
+        require_report_metrics=True,
+        require_finite_report_metrics=True,
+    )
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     np.save(args.output_dir / "evaluation_mask.npy", mask)

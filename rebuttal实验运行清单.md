@@ -43,6 +43,9 @@
 - [ ] 上述每个分数各自配套输出 AUROC、AP、Point-F1、PA-F1、Aff-P、Aff-R、Aff-F1、
   VUS-ROC、VUS-PR；缺任一字段的任务不得标记完成或被 resume 复用；`cdf_mean` 固定为
   主结果，但不得只输出 selected 指标；
+- [ ] 九项指标执行“字段强制、适用性显式”：有正负标签且时间轴连续的检测任务必须为
+  有限值；TEP fault-only 单类机制序列保留字段并写 `NaN`/原因；E11/E12/E39 和纯资源
+  汇总不产生新分数，只复用来源实验指标，不伪造九项数值；
 - [ ] `resource_metrics.json`、模型大小、memory 大小和总产物大小；
 - [ ] 失败时的 manifest、异常类型、最后 checkpoint 和可续跑状态。
 

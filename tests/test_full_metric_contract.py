@@ -23,6 +23,37 @@ def _load_standalone_evaluation():
 
 
 class FullMetricContractTests(unittest.TestCase):
+    def test_vectorized_point_adjustment_matches_naive_threshold_scan(self) -> None:
+        evaluation = _load_standalone_evaluation()
+        rng = np.random.default_rng(42)
+        for length in (4, 17, 128):
+            for _ in range(20):
+                labels = (rng.random(length) < 0.25).astype(np.int32)
+                labels[rng.integers(0, length)] = 1
+                scores = np.round(rng.random(length), 2)
+
+                segments = evaluation._anomaly_segments(labels)
+                best_f1 = -1.0
+                best_threshold = float("nan")
+                for threshold in np.unique(scores):
+                    adjusted = np.zeros_like(labels)
+                    adjusted[scores >= threshold] = 1
+                    for start, end in segments:
+                        if np.any(adjusted[start:end]):
+                            adjusted[start:end] = 1
+                    true_positive = float(np.sum((adjusted == 1) & (labels == 1)))
+                    false_positive = float(np.sum((adjusted == 1) & (labels == 0)))
+                    precision = true_positive / max(true_positive + false_positive, 1e-12)
+                    recall = true_positive / max(float(labels.sum()), 1e-12)
+                    f1 = 2.0 * precision * recall / max(precision + recall, 1e-12)
+                    if f1 > best_f1:
+                        best_f1 = f1
+                        best_threshold = float(threshold)
+
+                actual = evaluation._point_adjusted_metrics(labels, scores)
+                self.assertAlmostEqual(actual["pa_best_f1"], best_f1)
+                self.assertAlmostEqual(actual["pa_best_threshold"], best_threshold)
+
     def test_standalone_evaluator_returns_all_registered_metrics(self) -> None:
         evaluation = _load_standalone_evaluation()
         metrics = evaluation.binary_point_metrics(

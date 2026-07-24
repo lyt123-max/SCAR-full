@@ -623,6 +623,8 @@ TEP selected 历史序列结果可保留原评估字段；full 的故障序列�
 
 论文表格和脚本中当前默认主报告分数为 `cdf_mean`，但所有正式 SCAR 运行必须同时保存并汇总 `raw_max`、`zscore_mean`、`cdf_mean`、`cdf_max` 以及 `completion_scale*`、`knn_distance`、`state_novelty` 和启用时的 `soft_support_score`。每个融合分数和每个诊断子分数都必须配套输出九项注册指标：AUROC (`roc_auc`)、AP (`pr_auc`)、Point-F1 (`point_best_f1`)、PA-F1 (`pa_best_f1`)、Aff-P (`aff_precision`)、Aff-R (`aff_recall`)、Aff-F1 (`aff_f1`)、VUS-ROC (`vus_roc`) 和 VUS-PR (`vus_pr`)；缺少任一字段的正式产物不得复用。P0 额外生成五主集、E1-E5 检索策略和 TEP 全分数表；P1 的 E29/E30/E31 均保留 SCAR/global 的完整分数列，E30 macro 对九项指标逐分数聚合；TSB-AD 对每个可用分数生成逐序列、来源数据集、官方总体和 dataset-macro 表。`cdf_mean` 仍是预先固定的主结果，其余分数用于诊断和融合对照；不得逐 CSV、逐来源数据集或逐指标挑选最优策略。TEP 序列级单类或无连续时间邻接的协议仍保留全部字段，但不适用项必须写为 `NaN` 并记录原因，不能伪造数值。
 
+九项指标契约采用“字段强制、适用性显式”的原则：具备正负标签且时间轴连续的逐点检测任务必须输出有限数值；单类 TEP fault-only 机制序列保留九个字段并写入 `NaN` 与原因；E11/E12/E39 及纯效率/资源汇总不产生新的异常分数，只复用其来源实验的指标，不单独套用九项分类指标。PA-F1 的最优阈值搜索使用与逐阈值扫描完全等价的向量化实现，以避免 SMD、SWaT 等长序列在全分数评估时出现不可接受的 Python 循环开销。
+
 ## 12. 维护清单
 
 以后修改项目时按以下规则维护文档：

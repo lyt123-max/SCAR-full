@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from typing import Any
 
@@ -47,6 +48,7 @@ def score_metric_groups(
     *,
     require_core: bool = True,
     require_report_metrics: bool = False,
+    require_finite_report_metrics: bool = False,
 ) -> dict[str, Mapping[str, Any]]:
     """Return fusion and diagnostic metric groups from trainer or strategy JSON."""
     root = payload.get("scores")
@@ -93,7 +95,40 @@ def score_metric_groups(
         incomplete = {key: value for key, value in incomplete.items() if value}
         if incomplete:
             raise KeyError(f"incomplete SCAR score metrics: {incomplete}")
+    if require_finite_report_metrics:
+        nonfinite = {
+            score_key: [
+                metric_key
+                for metric_key in REQUIRED_REPORT_METRIC_KEYS
+                if not _is_finite_number(metrics.get(metric_key))
+            ]
+            for score_key, metrics in groups.items()
+        }
+        nonfinite = {key: value for key, value in nonfinite.items() if value}
+        if nonfinite:
+            raise ValueError(f"non-finite SCAR score metrics: {nonfinite}")
     return groups
+
+
+def _is_finite_number(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def require_finite_report_metrics(
+    metrics: Mapping[str, Any], *, context: str = "metrics"
+) -> None:
+    invalid = [
+        key
+        for key in REQUIRED_REPORT_METRIC_KEYS
+        if not _is_finite_number(metrics.get(key))
+    ]
+    if invalid:
+        raise ValueError(f"{context} has missing or non-finite report metrics: {invalid}")
 
 
 def flatten_score_metrics(

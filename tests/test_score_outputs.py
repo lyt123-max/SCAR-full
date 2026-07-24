@@ -71,6 +71,23 @@ class ScoreOutputSchemaTests(unittest.TestCase):
                 require_report_metrics=True,
             )
 
+    def test_nonfinite_report_metric_is_rejected_when_protocol_is_applicable(self) -> None:
+        nonfinite = metric(0.5)
+        nonfinite["vus_roc"] = float("nan")
+        payload = {
+            **{key: metric(0.5) for key in CORE_FUSION_SCORE_KEYS},
+            "subscores": {"knn_distance": nonfinite},
+        }
+        with self.assertRaisesRegex(ValueError, "vus_roc"):
+            score_metric_groups(
+                payload,
+                require_report_metrics=True,
+                require_finite_report_metrics=True,
+            )
+
+        groups = score_metric_groups(payload, require_report_metrics=True)
+        self.assertIn("knn_distance", groups)
+
 
 if __name__ == "__main__":
     unittest.main()

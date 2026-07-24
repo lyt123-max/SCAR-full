@@ -4,14 +4,18 @@ import hashlib
 import importlib.util
 import json
 import random
+import sys
 import time
 from pathlib import Path
 from typing import Any, Callable
 
 import numpy as np
 
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.experiments.score_outputs import require_finite_report_metrics
 
 
 def load_common_data(data_dir: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -109,6 +113,7 @@ def save_standard_outputs(
     if not np.isfinite(scores).all():
         raise ValueError(f"{method} produced NaN or infinite scores.")
     metrics = _load_binary_metrics()(labels, scores)
+    require_finite_report_metrics(metrics, context=f"{method}/{dataset}")
     output_dir.mkdir(parents=True, exist_ok=True)
     np.save(output_dir / "scores.npy", scores)
     np.save(output_dir / "labels.npy", labels)

@@ -182,8 +182,11 @@ def artifact_is_complete(spec: RunSpec) -> bool:
                 metrics,
                 require_core=True,
                 require_report_metrics=True,
+                require_finite_report_metrics=(
+                    metrics.get("classification_metrics_available") is not False
+                ),
             )
-        except KeyError:
+        except (KeyError, ValueError):
             return False
         expected_subscores = {
             name.removeprefix("test_scores_").removesuffix(".npy")

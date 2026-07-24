@@ -2368,38 +2368,39 @@ class CoReMADTrainer:
         seg_len = np.asarray([float(end - start) for start, end in segments], dtype=np.float64)
 
         candidate_thresholds = np.unique(scores.astype(np.float64))
-        best = {
-            "pa_best_f1": -1.0,
-            "pa_best_threshold": 0.5,
-            "pa_precision_at_best_f1": 0.0,
-            "pa_recall_at_best_f1": 0.0,
-            "pa_positive_ratio": 0.0,
+        false_positive = normal_sorted.size - np.searchsorted(
+            normal_sorted, candidate_thresholds, side="left"
+        )
+
+        segment_order = np.argsort(seg_max, kind="mergesort")
+        sorted_segment_max = seg_max[segment_order]
+        sorted_segment_length = seg_len[segment_order]
+        prefix_length = np.concatenate(
+            [np.zeros(1, dtype=np.float64), np.cumsum(sorted_segment_length)]
+        )
+        first_detected = np.searchsorted(
+            sorted_segment_max, candidate_thresholds, side="left"
+        )
+        true_positive = total_anomaly_points - prefix_length[first_detected]
+
+        precision = true_positive / np.maximum(
+            true_positive + false_positive, 1e-12
+        )
+        recall = true_positive / max(total_anomaly_points, 1e-12)
+        f1 = 2.0 * precision * recall / np.maximum(precision + recall, 1e-12)
+        positive_ratio = (true_positive + false_positive) / max(
+            float(len(labels)), 1e-12
+        )
+        best_idx = int(np.nanargmax(f1))
+        return {
+            "pa_best_f1": float(f1[best_idx]),
+            "pa_best_threshold": float(candidate_thresholds[best_idx]),
+            "pa_precision_at_best_f1": float(precision[best_idx]),
+            "pa_recall_at_best_f1": float(recall[best_idx]),
+            "pa_positive_ratio": float(positive_ratio[best_idx]),
+            "pa_best_precision": float(precision[best_idx]),
+            "pa_best_recall": float(recall[best_idx]),
         }
-
-        total_points = float(len(labels))
-        for threshold in candidate_thresholds:
-            normal_idx = np.searchsorted(normal_sorted, threshold, side="left")
-            fp = float(normal_sorted.size - normal_idx)
-
-            # Point-adjust: if any point in a segment is predicted positive, count the whole segment as TP.
-            tp = float(seg_len[seg_max >= threshold].sum())
-
-            precision = tp / max(tp + fp, 1e-12)
-            recall = tp / max(total_anomaly_points, 1e-12)
-            f1 = 2.0 * precision * recall / max(precision + recall, 1e-12)
-            positive_ratio = (tp + fp) / max(total_points, 1e-12)
-
-            if f1 > best["pa_best_f1"]:
-                best = {
-                    "pa_best_f1": float(f1),
-                    "pa_best_threshold": float(threshold),
-                    "pa_precision_at_best_f1": float(precision),
-                    "pa_recall_at_best_f1": float(recall),
-                    "pa_positive_ratio": float(positive_ratio),
-                    "pa_best_precision": float(precision),
-                    "pa_best_recall": float(recall),
-                }
-        return best
 
     @classmethod
     def _compute_metrics(
