@@ -634,10 +634,11 @@ Affiliation event 实现计算；VUS-ROC/VUS-PR 仍由 TSB-AD 官方实现计算
 额外执行 100 次 Affiliation 阈值扫描。
 
 正式 SCAR/TEP 任务通过 manifest 环境元数据固定
-`SCAR_METRIC_WORKERS=8`，在 GPU 推理结束后并行评估不同融合与子分数。线程只读取
-相同 labels/scores 并分别调用无共享状态的评估器，不改变模型、分数或指标定义；
-最终结果仍按注册表顺序写入。该设置利用远程多核 CPU，避免 SMD/SWaT 的官方 VUS
-计算长时间阻塞下一项 GPU 任务。
+`SCAR_METRIC_WORKERS=8`，在 GPU 推理结束后使用 `spawn` 进程并行评估不同融合与
+子分数。每个 worker 将 Torch CPU 线程限制为 1，只读取自己的 labels/scores 并调用
+无共享状态的评估器，不 fork 已初始化的 CUDA 上下文，也不改变模型、分数或指标
+定义；最终结果仍按注册表顺序写入。该设置利用远程多核 CPU，避免 SMD/SWaT 的官方
+VUS 计算长时间阻塞下一项 GPU 任务。
 
 ## 12. 维护清单
 

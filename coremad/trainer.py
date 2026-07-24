@@ -6,8 +6,9 @@ import os
 import random
 import shutil
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
 from contextlib import nullcontext
+from multiprocessing import get_context
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -45,6 +46,15 @@ from .resource_monitor import ResourceMonitor
 from .scorer import CDFPITFusion, ZScoreMeanFusion, fuse_raw_max
 from .temporal_metrics import HAS_TEMPORAL_METRICS, compute_temporal_metrics
 from .visualization import plot_score_distribution, plot_score_timeline, plot_training_curves
+
+
+def _compute_metrics_process(
+    labels: np.ndarray,
+    scores: np.ndarray,
+    vus_window: Optional[int],
+) -> dict[str, float]:
+    torch.set_num_threads(1)
+    return CoReMADTrainer._compute_metrics(labels, scores, vus_window=vus_window)
 
 
 BASE_TEST_DIAGNOSTIC_SPECS = [
@@ -1402,7 +1412,10 @@ class CoReMADTrainer:
                     f"[Test] evaluating {len(metric_sources)} score streams "
                     f"with {metric_workers} metric workers"
                 )
-                with ThreadPoolExecutor(max_workers=metric_workers) as executor:
+                with ProcessPoolExecutor(
+                    max_workers=metric_workers,
+                    mp_context=get_context("spawn"),
+                ) as executor:
                     metric_futures = {
                         name: executor.submit(
                             self._compute_metrics,
