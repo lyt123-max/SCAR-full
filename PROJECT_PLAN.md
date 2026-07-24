@@ -968,4 +968,5 @@ P0 的 654 次 full model fit 与 180 次 Stage-B/Test，新增的 E10 冻结协
 表格收口均为 analysis，不增加训练。TEP full 按序列级产物验收，正式要求
 `test_sequence_scores_selected.npy`、序列表、指标、资源、checkpoint、memory、
 fusion 和 full memory audit；`max_test_sequences` 仅供远程 smoke 显式限为 2，
-正式任务保持 `0` 并评估全部 168 条故障序列。
+正式任务保持 `0` 并评估全部 168 条故障序列。中央 manifest 通过环境变量显式传入
+正式 `ARTIFACT_ROOT`，禁止 TEP shell 回退到仓库内默认 `./artifacts`。

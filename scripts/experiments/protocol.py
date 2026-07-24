@@ -431,6 +431,7 @@ def build_p0_tasks(artifact_root: Path, *, python_exe: str) -> list[RunSpec]:
                     "TEP_ALLOW_PLOTS": "0",
                     "MAX_TEST_SEQUENCES": "0",
                     "SCAR_METRIC_WORKERS": "8",
+                    "ARTIFACT_ROOT": str(artifact_root),
                 }
             },
         )

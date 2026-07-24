@@ -117,6 +117,10 @@ class FormalProtocolTests(unittest.TestCase):
         self.assertNotIn("test_scores_selected.npy", tep.required_artifacts)
         self.assertEqual(tep.metadata["environment"]["FORMAL_REBUTTAL"], "1")
         self.assertEqual(tep.metadata["environment"]["MAX_TEST_SEQUENCES"], "0")
+        self.assertEqual(
+            Path(tep.metadata["environment"]["ARTIFACT_ROOT"]),
+            tep.artifact_dir.parent,
+        )
 
     def test_p0_collector_declares_strategy_and_tep_score_tables(self) -> None:
         tasks = build_p0_tasks(Path("/artifacts"), python_exe="python")
