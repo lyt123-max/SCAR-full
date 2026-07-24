@@ -138,6 +138,18 @@ def static_checks(artifact_root: Path) -> list[dict]:
 def runtime_checks() -> list[dict]:
     checks = []
     try:
+        import numpy as np
+
+        checks.append(
+            {
+                "name": "numpy_version",
+                "ok": np.__version__ == "1.26.4",
+                "detail": np.__version__,
+            }
+        )
+    except ImportError as exc:
+        checks.append({"name": "numpy_runtime", "ok": False, "detail": str(exc)})
+    try:
         import torch
 
         checks.append(

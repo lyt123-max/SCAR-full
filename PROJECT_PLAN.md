@@ -936,6 +936,11 @@ PGRF-Net 通过项目侧 adapter 使用只读上游源码，统一导出 `scores
 AUROC/AP、1 次预热加 3 次计时、资源 JSON 和运行 manifest。CATCH adapter 仅作为
 论文修订复现工具保留，不进入正式 manifest。
 
+SCAR/PaAno 环境固定 NumPy `1.26.4`，以满足 `TSB-AD==1.5` 声明的
+`numpy>=1.24.3,<2.0` 约束；PaAno 所需 statsmodels 固定为 `0.14.5`。若使用 pip
+构建兼容环境，必须明确配对 torch `2.7.1`、torchvision `0.22.1` 和 torchaudio
+`2.7.1` 的 cu126 wheel，禁止让未固定的 torchaudio 升级并破坏 Torch ABI。
+
 PaAno 正式适配遵循其官方 multivariate 启动脚本的 `patch_size=96`、
 `num_iters=100`、`batch_size=512`、`lr=1e-4` 和 RevIN 设置；仅随机种子按本项目
 预注册协议统一为 `42`，不采用上游示例的 `2027`。
