@@ -140,15 +140,26 @@ class TSBADOutputTests(unittest.TestCase):
     def test_resume_requires_all_score_artifacts(self):
         with tempfile.TemporaryDirectory() as temp:
             experiment_dir = Path(temp)
-            score_metrics = {key: {"roc_auc": 0.5, "pr_auc": 0.4} for key in SCORE_KEYS}
+            complete_metrics = {
+                "roc_auc": 0.5,
+                "pr_auc": 0.4,
+                "point_best_f1": 0.3,
+                "pa_best_f1": 0.3,
+                "aff_precision": 0.2,
+                "aff_recall": 0.2,
+                "aff_f1": 0.2,
+                "vus_roc": 0.6,
+                "vus_pr": 0.5,
+            }
+            score_metrics = {key: complete_metrics for key in SCORE_KEYS}
             metrics = {
                 "dataset_metadata": {"total_length": 16},
                 **score_metrics,
                 "subscores": {
-                    "completion_scale8": {"roc_auc": 0.5, "pr_auc": 0.4},
-                    "completion_scale32": {"roc_auc": 0.5, "pr_auc": 0.4},
-                    "knn_distance": {"roc_auc": 0.5, "pr_auc": 0.4},
-                    "state_novelty": {"roc_auc": 0.5, "pr_auc": 0.4},
+                    "completion_scale8": complete_metrics,
+                    "completion_scale32": complete_metrics,
+                    "knn_distance": complete_metrics,
+                    "state_novelty": complete_metrics,
                 },
             }
             (experiment_dir / "test_metrics.json").write_text(json.dumps(metrics), encoding="utf-8")
@@ -157,6 +168,19 @@ class TSBADOutputTests(unittest.TestCase):
                     np.save(experiment_dir / name, np.arange(16, dtype=np.float32))
             np.savez(experiment_dir / "test_diagnostic_scores.npz", labels=np.zeros(16))
             self.assertTrue(_is_complete(experiment_dir, "full", [8, 32]))
+            metrics["subscores"]["knn_distance"] = {
+                key: value
+                for key, value in complete_metrics.items()
+                if key != "aff_recall"
+            }
+            (experiment_dir / "test_metrics.json").write_text(
+                json.dumps(metrics), encoding="utf-8"
+            )
+            self.assertFalse(_is_complete(experiment_dir, "full", [8, 32]))
+            metrics["subscores"]["knn_distance"] = complete_metrics
+            (experiment_dir / "test_metrics.json").write_text(
+                json.dumps(metrics), encoding="utf-8"
+            )
             (experiment_dir / "test_scores_cdf_max.npy").unlink()
             self.assertFalse(_is_complete(experiment_dir, "full", [8, 32]))
 
@@ -171,6 +195,11 @@ class TSBADOutputTests(unittest.TestCase):
                     "vus_roc": 0.2 + index,
                     "roc_auc": 0.3 + index,
                     "pr_auc": 0.4 + index,
+                    "point_best_f1": 0.5 + index,
+                    "pa_best_f1": 0.6 + index,
+                    "aff_precision": 0.7 + index,
+                    "aff_recall": 0.8 + index,
+                    "aff_f1": 0.9 + index,
                 }
                 for index, key in enumerate(SCORE_KEYS)
             }
@@ -188,12 +217,22 @@ class TSBADOutputTests(unittest.TestCase):
                         "vus_roc": 0.6,
                         "roc_auc": 0.7,
                         "pr_auc": 0.8,
+                        "point_best_f1": 0.6,
+                        "pa_best_f1": 0.5,
+                        "aff_precision": 0.4,
+                        "aff_recall": 0.3,
+                        "aff_f1": 0.35,
                     },
                     "state_novelty": {
                         "vus_pr": 0.4,
                         "vus_roc": 0.5,
                         "roc_auc": 0.6,
                         "pr_auc": 0.7,
+                        "point_best_f1": 0.5,
+                        "pa_best_f1": 0.4,
+                        "aff_precision": 0.3,
+                        "aff_recall": 0.2,
+                        "aff_f1": 0.24,
                     },
                 },
             }

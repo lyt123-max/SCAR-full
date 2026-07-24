@@ -2,6 +2,103 @@ from __future__ import annotations
 
 import numpy as np
 
+try:
+    from TSB_AD.evaluation.metrics import get_metrics as vus_get_metrics
+
+    HAS_VUS_METRICS = True
+except Exception:
+    try:
+        from vus.metrics import get_metrics as vus_get_metrics
+
+        HAS_VUS_METRICS = True
+    except Exception:
+        vus_get_metrics = None
+        HAS_VUS_METRICS = False
+
+
+def _anomaly_segments(labels: np.ndarray) -> list[tuple[int, int]]:
+    padded = np.pad(np.asarray(labels, dtype=np.int8), (1, 1))
+    changes = np.diff(padded)
+    starts = np.flatnonzero(changes == 1)
+    ends = np.flatnonzero(changes == -1)
+    return list(zip(starts.tolist(), ends.tolist()))
+
+
+def _point_adjusted_metrics(labels: np.ndarray, scores: np.ndarray) -> dict[str, float]:
+    segments = _anomaly_segments(labels)
+    if not segments:
+        return {
+            "pa_best_f1": float("nan"),
+            "pa_best_threshold": float("nan"),
+        }
+    normal_sorted = np.sort(scores[labels == 0])
+    segment_max = np.asarray([scores[start:end].max() for start, end in segments])
+    segment_length = np.asarray([end - start for start, end in segments], dtype=np.float64)
+    positive_points = float(labels.sum())
+    best_f1 = -1.0
+    best_threshold = float("nan")
+    for threshold in np.unique(scores):
+        false_positive = float(
+            normal_sorted.size - np.searchsorted(normal_sorted, threshold, side="left")
+        )
+        true_positive = float(segment_length[segment_max >= threshold].sum())
+        precision = true_positive / max(true_positive + false_positive, 1e-12)
+        recall = true_positive / max(positive_points, 1e-12)
+        f1 = 2.0 * precision * recall / max(precision + recall, 1e-12)
+        if f1 > best_f1:
+            best_f1 = float(f1)
+            best_threshold = float(threshold)
+    return {"pa_best_f1": best_f1, "pa_best_threshold": best_threshold}
+
+
+def _temporal_metrics(labels: np.ndarray, scores: np.ndarray) -> dict[str, float]:
+    empty = {
+        "aff_precision": float("nan"),
+        "aff_recall": float("nan"),
+        "aff_f1": float("nan"),
+        "vus_roc": float("nan"),
+        "vus_pr": float("nan"),
+        "vus_window": float("nan"),
+    }
+    if not HAS_VUS_METRICS:
+        return empty
+    finite = scores[np.isfinite(scores)]
+    if finite.size == 0:
+        return empty
+    minimum = float(finite.min())
+    maximum = float(finite.max())
+    normalized = (
+        np.zeros_like(scores, dtype=np.float64)
+        if maximum - minimum < 1e-12
+        else np.clip((scores - minimum) / (maximum - minimum), 0.0, 1.0)
+    )
+    lengths = [end - start for start, end in _anomaly_segments(labels)]
+    vus_window = max(1, int(np.median(lengths))) if lengths else 1
+    try:
+        result = vus_get_metrics(
+            normalized,
+            labels.astype(np.int32),
+            metric="all",
+            slidingWindow=vus_window,
+        )
+    except Exception:
+        return empty
+    precision = float(result.get("Affiliation_Precision", float("nan")))
+    recall = float(result.get("Affiliation_Recall", float("nan")))
+    aff_f1 = (
+        2.0 * precision * recall / max(precision + recall, 1e-12)
+        if np.isfinite(precision) and np.isfinite(recall)
+        else float("nan")
+    )
+    return {
+        "aff_precision": precision,
+        "aff_recall": recall,
+        "aff_f1": float(aff_f1),
+        "vus_roc": float(result.get("VUS_ROC", float("nan"))),
+        "vus_pr": float(result.get("VUS_PR", float("nan"))),
+        "vus_window": float(vus_window),
+    }
+
 
 def _average_ranks(values: np.ndarray) -> np.ndarray:
     order = np.argsort(values, kind="mergesort")
@@ -57,10 +154,11 @@ def binary_point_metrics(
     pr_auc = float(np.sum(np.diff(np.concatenate([[0.0], recall])) * precision))
     f1 = 2.0 * precision * recall / np.maximum(precision + recall, 1e-12)
     best_index = int(np.argmax(f1))
-    return {
+    result = {
         "roc_auc": float(roc_auc),
         "pr_auc": pr_auc,
         "best_f1": float(f1[best_index]),
+        "point_best_f1": float(f1[best_index]),
         "precision_at_best_f1": float(precision[best_index]),
         "recall_at_best_f1": float(recall[best_index]),
         "threshold_at_best_f1": float(sorted_score[distinct_ends[best_index]]),
@@ -68,3 +166,6 @@ def binary_point_metrics(
         "n_positive": positives,
         "n_negative": negatives,
     }
+    result.update(_point_adjusted_metrics(y, score))
+    result.update(_temporal_metrics(y, score))
+    return result

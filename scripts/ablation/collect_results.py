@@ -173,7 +173,13 @@ def build_records(args: argparse.Namespace) -> list[dict[str, Any]]:
                     selected = scores_root.get("selected")
                 if isinstance(selected, dict):
                     score_payloads["selected"] = selected
-                score_payloads.update(score_metric_groups(payload, require_core=False))
+                score_payloads.update(
+                    score_metric_groups(
+                        payload,
+                        require_core=False,
+                        require_report_metrics=True,
+                    )
+                )
             score_keys = (
                 list(args.score_keys)
                 if args.score_keys

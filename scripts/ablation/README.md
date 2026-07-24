@@ -173,8 +173,8 @@ It writes:
 
 The paper-oriented defaults are now:
 
-- Point-wise main table: `PR-AUC`, `ROC-AUC`, and `F1`
-- A3 fusion-family table: `PR-AUC`, `ROC-AUC`, and `F1`
+- Point-wise main table: all nine registered score metrics
+- A3 fusion-family table: all nine registered score metrics
 - Stability analysis: `PR-AUC`
 - TEP sequence-level main metrics: `AUPRC`, `AUROC`, and `F1`
 
@@ -216,6 +216,10 @@ Collect the stable experiment directories with:
 ```bash
 python scripts/ablation/collect_results.py
 ```
+
+The collector discovers all fusion and diagnostic score keys and requires the
+nine registered metrics (AUROC, AP, Point-F1, PA-F1, Aff-P, Aff-R, Aff-F1,
+VUS-ROC, and VUS-PR) for every discovered score.
 
 Render a Markdown table for the point-wise best F1 reported on `cdf_mean`:
 

@@ -35,12 +35,29 @@ except ImportError:
 
 
 SCORE_KEYS = ("raw_max", "zscore_mean", "cdf_mean", "cdf_max")
-METRIC_KEYS = ("vus_pr", "vus_roc", "auroc", "ap", "runtime_seconds", "coverage")
+METRIC_KEYS = (
+    "auroc",
+    "ap",
+    "point_f1",
+    "pa_f1",
+    "aff_p",
+    "aff_r",
+    "aff_f1",
+    "vus_roc",
+    "vus_pr",
+    "runtime_seconds",
+    "coverage",
+)
 METRIC_SOURCE_KEYS = {
-    "vus_pr": "vus_pr",
-    "vus_roc": "vus_roc",
     "auroc": "roc_auc",
     "ap": "pr_auc",
+    "point_f1": "point_best_f1",
+    "pa_f1": "pa_best_f1",
+    "aff_p": "aff_precision",
+    "aff_r": "aff_recall",
+    "aff_f1": "aff_f1",
+    "vus_roc": "vus_roc",
+    "vus_pr": "vus_pr",
 }
 
 
@@ -118,7 +135,9 @@ def _run_rows(
             record = _read_json(record_path) if record_path.exists() else {}
             runtime = _finite(record.get("runtime_seconds"))
             for score_key, score_metrics in score_metric_groups(
-                metrics, require_core=True
+                metrics,
+                require_core=True,
+                require_report_metrics=True,
             ).items():
                 row: dict[str, Any] = {
                     "edition": edition,

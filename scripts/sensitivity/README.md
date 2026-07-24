@@ -11,7 +11,7 @@ This folder contains a reproducible sensitivity-analysis workflow for CoReM-AD o
 - Stores a machine-readable summary in `csv/json`.
 - The summary records `raw_max`, `zscore_mean`, `cdf_mean`, `cdf_max`, optional CDF variants, and every available diagnostic subscore for each sweep point.
 - The cross-dataset collector discovers all score keys by default; `--score-keys` is only an explicit narrowing override for legacy analyses.
-- The summary now includes `Affiliated-Precision`, `Affiliated-Recall`, `Range-Precision`, and `Range-Recall` in addition to the F1/AUC metrics.
+- Every discovered fusion score and diagnostic subscore carries the registered AUROC, AP, Point-F1, PA-F1, Aff-P, Aff-R, Aff-F1, VUS-ROC, and VUS-PR fields.
 - Draws paper-style main/appendix figures and exports both `png` and `pdf`.
 
 ## Important design notes

@@ -165,6 +165,18 @@ def runtime_checks() -> list[dict]:
         )
     except ImportError as exc:
         checks.append({"name": "torch_runtime", "ok": False, "detail": str(exc)})
+    try:
+        from TSB_AD.evaluation.metrics import get_metrics
+
+        checks.append(
+            {
+                "name": "tsb_ad_metrics",
+                "ok": callable(get_metrics),
+                "detail": "TSB_AD.evaluation.metrics.get_metrics",
+            }
+        )
+    except ImportError as exc:
+        checks.append({"name": "tsb_ad_metrics", "ok": False, "detail": str(exc)})
     return checks
 
 

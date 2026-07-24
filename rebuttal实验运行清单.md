@@ -40,8 +40,9 @@
 - [ ] 与测试标签等长的逐点 anomaly scores：`raw_max`、`zscore_mean`、`cdf_mean`、
   `cdf_max`，以及全部 `completion_scale*`、`knn_distance`、`state_novelty` 和启用时的
   `soft_support_score`；序列协议保存对应的逐序列分数；
-- [ ] 上述每个分数各自的 AUROC、AP 及相应协议要求的 F1、VUS、Affiliation、Range
-  等指标；`cdf_mean` 固定为主结果，但不得只输出 selected 指标；
+- [ ] 上述每个分数各自配套输出 AUROC、AP、Point-F1、PA-F1、Aff-P、Aff-R、Aff-F1、
+  VUS-ROC、VUS-PR；缺任一字段的任务不得标记完成或被 resume 复用；`cdf_mean` 固定为
+  主结果，但不得只输出 selected 指标；
 - [ ] `resource_metrics.json`、模型大小、memory 大小和总产物大小；
 - [ ] 失败时的 manifest、异常类型、最后 checkpoint 和可续跑状态。
 
@@ -261,7 +262,8 @@ python scripts/tsb_ad/run_benchmark.py \
 
 ### 9.2 汇总
 
-- [ ] VUS-PR、VUS-ROC、AUROC、AP；
+- [ ] 对四种融合和全部子分数输出 AUROC、AP、Point-F1、PA-F1、Aff-P、Aff-R、
+  Aff-F1、VUS-ROC、VUS-PR；
 - [ ] 官方逐序列平均和来源数据集 macro-average；
 - [ ] M 180、U 350 的有效序列数和失败数；
 - [ ] 总运行时间、单序列时间分布和资源摘要；

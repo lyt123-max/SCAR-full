@@ -799,7 +799,11 @@ def read_metric_summary(exp_dir: Path) -> dict[str, Any]:
     payload = metrics if isinstance(metrics, dict) else {}
     score_metrics: dict[str, dict[str, float]] = {}
     flattened: dict[str, Any] = {}
-    groups = score_metric_groups(payload, require_core=True)
+    groups = score_metric_groups(
+        payload,
+        require_core=True,
+        require_report_metrics=True,
+    )
     for score_key, metric_root in groups.items():
         summary = extract_metric_summary(metric_root)
         score_metrics[score_key] = summary

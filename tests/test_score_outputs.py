@@ -4,13 +4,16 @@ import unittest
 
 from scripts.experiments.score_outputs import (
     CORE_FUSION_SCORE_KEYS,
+    REQUIRED_REPORT_METRIC_KEYS,
     flatten_score_metrics,
     score_metric_groups,
 )
 
 
 def metric(value: float) -> dict[str, float]:
-    return {"roc_auc": value, "pr_auc": value / 2, "best_f1": value / 3}
+    result = {key: value for key in REQUIRED_REPORT_METRIC_KEYS}
+    result["best_f1"] = value
+    return result
 
 
 class ScoreOutputSchemaTests(unittest.TestCase):
@@ -31,6 +34,9 @@ class ScoreOutputSchemaTests(unittest.TestCase):
         self.assertIn("cdf_mean_pr_auc", flat)
         self.assertIn("completion_scale8_roc_auc", flat)
         self.assertIn("knn_distance_pr_auc", flat)
+        for score_key in (*CORE_FUSION_SCORE_KEYS, "completion_scale8"):
+            for metric_key in REQUIRED_REPORT_METRIC_KEYS:
+                self.assertIn(f"{score_key}_{metric_key}", flat)
 
     def test_strategy_schema_detects_peer_subscores(self) -> None:
         scores = {
@@ -51,6 +57,18 @@ class ScoreOutputSchemaTests(unittest.TestCase):
                     for key in CORE_FUSION_SCORE_KEYS
                     if key != "cdf_max"
                 }
+            )
+
+    def test_missing_report_metric_is_rejected(self) -> None:
+        incomplete = metric(0.5)
+        incomplete.pop("aff_recall")
+        with self.assertRaisesRegex(KeyError, "aff_recall"):
+            score_metric_groups(
+                {
+                    **{key: metric(0.5) for key in CORE_FUSION_SCORE_KEYS},
+                    "subscores": {"knn_distance": incomplete},
+                },
+                require_report_metrics=True,
             )
 
 

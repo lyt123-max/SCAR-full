@@ -3,10 +3,20 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
-from collect_results import ABLATION_LABELS, DEFAULT_ABLATIONS, format_metric_value
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.ablation.collect_results import (
+    ABLATION_LABELS,
+    DEFAULT_ABLATIONS,
+    format_metric_value,
+)
+from scripts.experiments.score_outputs import REQUIRED_REPORT_METRIC_KEYS
 
 
 DEFAULT_DATASETS = ["MSL", "SMAP", "PSM", "SWAT", "SMD", "TEP", "GECCO", "GENESIS"]
@@ -23,7 +33,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Collect a global ablation summary across multiple dataset-specific artifact roots. "
-            "Outputs a wide table with main ROC-AUC / PR-AUC and all discovered subscore ROC-AUC / PR-AUC."
+            "Outputs wide and long tables with the nine registered metrics for the main score and every subscore."
         )
     )
     parser.add_argument("--artifact_roots", type=Path, nargs="+", required=True)
@@ -204,17 +214,15 @@ def build_wide_rows(records: list[dict[str, Any]], subscore_keys: list[str]) -> 
             "artifact_root": record["artifact_root"],
             "evaluation_protocol": record["evaluation_protocol"],
             "main_score_key": record["main_score_key"],
-            "main_roc_auc": record["main"].get("roc_auc"),
-            "main_pr_auc": record["main"].get("pr_auc"),
-            "main_vus_roc": record["main"].get("vus_roc"),
-            "main_vus_pr": record["main"].get("vus_pr"),
         }
+        for metric_key in REQUIRED_REPORT_METRIC_KEYS:
+            row[f"main_{metric_key}"] = record["main"].get(metric_key)
         for subscore_key in subscore_keys:
             payload = record["subscores"].get(subscore_key, {})
-            row[f"{subscore_key}_roc_auc"] = payload.get("roc_auc") if isinstance(payload, dict) else None
-            row[f"{subscore_key}_pr_auc"] = payload.get("pr_auc") if isinstance(payload, dict) else None
-            row[f"{subscore_key}_vus_roc"] = payload.get("vus_roc") if isinstance(payload, dict) else None
-            row[f"{subscore_key}_vus_pr"] = payload.get("vus_pr") if isinstance(payload, dict) else None
+            for metric_key in REQUIRED_REPORT_METRIC_KEYS:
+                row[f"{subscore_key}_{metric_key}"] = (
+                    payload.get(metric_key) if isinstance(payload, dict) else None
+                )
         rows.append(row)
     return rows
 
@@ -232,10 +240,10 @@ def build_long_rows(records: list[dict[str, Any]], subscore_keys: list[str]) -> 
                 "evaluation_protocol": record["evaluation_protocol"],
                 "score_group": "main",
                 "score_key": record["main_score_key"],
-                "roc_auc": record["main"].get("roc_auc"),
-                "pr_auc": record["main"].get("pr_auc"),
-                "vus_roc": record["main"].get("vus_roc"),
-                "vus_pr": record["main"].get("vus_pr"),
+                **{
+                    metric_key: record["main"].get(metric_key)
+                    for metric_key in REQUIRED_REPORT_METRIC_KEYS
+                },
             }
         )
         for subscore_key in subscore_keys:
@@ -250,10 +258,12 @@ def build_long_rows(records: list[dict[str, Any]], subscore_keys: list[str]) -> 
                     "evaluation_protocol": record["evaluation_protocol"],
                     "score_group": "subscore",
                     "score_key": subscore_key,
-                    "roc_auc": payload.get("roc_auc") if isinstance(payload, dict) else None,
-                    "pr_auc": payload.get("pr_auc") if isinstance(payload, dict) else None,
-                    "vus_roc": payload.get("vus_roc") if isinstance(payload, dict) else None,
-                    "vus_pr": payload.get("vus_pr") if isinstance(payload, dict) else None,
+                    **{
+                        metric_key: (
+                            payload.get(metric_key) if isinstance(payload, dict) else None
+                        )
+                        for metric_key in REQUIRED_REPORT_METRIC_KEYS
+                    },
                 }
             )
     return rows
@@ -292,16 +302,9 @@ def write_markdown(path: Path, records: list[dict[str, Any]], subscore_keys: lis
 
     for dataset in dataset_order:
         dataset_rows = [row for row in records if row["dataset"] == dataset]
-        header = ["Ablation", "Main ROC-AUC", "Main PR-AUC", "Main VUS-ROC", "Main VUS-PR"]
+        header = ["Ablation", *[f"Main {key}" for key in REQUIRED_REPORT_METRIC_KEYS]]
         for subscore_key in subscore_keys:
-            header.extend(
-                [
-                    f"{subscore_key} ROC",
-                    f"{subscore_key} PR",
-                    f"{subscore_key} VUS-ROC",
-                    f"{subscore_key} VUS-PR",
-                ]
-            )
+            header.extend(f"{subscore_key} {key}" for key in REQUIRED_REPORT_METRIC_KEYS)
 
         lines.append(f"## {dataset}")
         lines.append("")
@@ -310,17 +313,19 @@ def write_markdown(path: Path, records: list[dict[str, Any]], subscore_keys: lis
         for row in dataset_rows:
             values = [
                 str(row["ablation_label"]),
-                format_metric_value(row["main"].get("roc_auc")),
-                format_metric_value(row["main"].get("pr_auc")),
-                format_metric_value(row["main"].get("vus_roc")),
-                format_metric_value(row["main"].get("vus_pr")),
+                *[
+                    format_metric_value(row["main"].get(metric_key))
+                    for metric_key in REQUIRED_REPORT_METRIC_KEYS
+                ],
             ]
             for subscore_key in subscore_keys:
                 payload = row["subscores"].get(subscore_key, {})
-                values.append(format_metric_value(payload.get("roc_auc") if isinstance(payload, dict) else None))
-                values.append(format_metric_value(payload.get("pr_auc") if isinstance(payload, dict) else None))
-                values.append(format_metric_value(payload.get("vus_roc") if isinstance(payload, dict) else None))
-                values.append(format_metric_value(payload.get("vus_pr") if isinstance(payload, dict) else None))
+                values.extend(
+                    format_metric_value(
+                        payload.get(metric_key) if isinstance(payload, dict) else None
+                    )
+                    for metric_key in REQUIRED_REPORT_METRIC_KEYS
+                )
             lines.append("| " + " | ".join(values) + " |")
         lines.append("")
 
@@ -342,19 +347,11 @@ def main() -> None:
         "artifact_root",
         "evaluation_protocol",
         "main_score_key",
-        "main_roc_auc",
-        "main_pr_auc",
-        "main_vus_roc",
-        "main_vus_pr",
+        *[f"main_{key}" for key in REQUIRED_REPORT_METRIC_KEYS],
     ]
     for subscore_key in subscore_keys:
         wide_fieldnames.extend(
-            [
-                f"{subscore_key}_roc_auc",
-                f"{subscore_key}_pr_auc",
-                f"{subscore_key}_vus_roc",
-                f"{subscore_key}_vus_pr",
-            ]
+            f"{subscore_key}_{key}" for key in REQUIRED_REPORT_METRIC_KEYS
         )
 
     long_fieldnames = [
@@ -366,10 +363,7 @@ def main() -> None:
         "evaluation_protocol",
         "score_group",
         "score_key",
-        "roc_auc",
-        "pr_auc",
-        "vus_roc",
-        "vus_pr",
+        *REQUIRED_REPORT_METRIC_KEYS,
     ]
 
     wide_csv_path = args.output_prefix.with_name(f"{args.output_prefix.name}_wide").with_suffix(".csv")

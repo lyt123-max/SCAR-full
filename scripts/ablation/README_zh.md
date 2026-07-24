@@ -227,6 +227,9 @@ RESUME=1 bash scripts/ablation/run_swat.sh single_scale_short test
 python scripts/ablation/collect_results.py
 ```
 
+汇总器会自动发现全部融合分数和诊断子分数，并要求每个分数都包含九项注册指标：
+AUROC、AP、Point-F1、PA-F1、Aff-P、Aff-R、Aff-F1、VUS-ROC 和 VUS-PR。
+
 输出文件通常位于：
 
 - `./artifacts/ablation_summary_<timestamp>.csv`
@@ -273,8 +276,8 @@ python scripts/ablation/generate_paper_tables.py
 
 当前论文专用汇总脚本的默认指标口径为：
 
-- 点级主表：`PR-AUC`、`ROC-AUC`、`F1`
-- A3 融合策略表：`PR-AUC`、`ROC-AUC`、`F1`
+- 点级主表：全部九项注册分数指标
+- A3 融合策略表：全部九项注册分数指标
 - 稳定性分析表：默认基于 `PR-AUC`
 - `TEP` 序列级主指标：`AUPRC`、`AUROC`、`F1`
 

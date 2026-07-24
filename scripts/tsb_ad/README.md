@@ -97,4 +97,4 @@ python scripts/tsb_ad/collect_results.py --edition M --split eval
 - `results_dataset_macro_average_wide.csv`
 - `collection_failures.csv`
 
-长表逐文件、逐 seed、逐融合策略/子分数保存 VUS-PR、VUS-ROC、AUROC、AP、运行时间和评分覆盖率。正式表只读取 seed `42`；collector 继续兼容历史 `seed_*` 目录。四张宽表分别用于逐序列、来源数据集平均、全部序列官方平均和来源数据集 macro-average。
+长表逐文件、逐 seed、逐融合策略/子分数保存 AUROC、AP、Point-F1、PA-F1、Aff-P、Aff-R、Aff-F1、VUS-ROC、VUS-PR、运行时间和评分覆盖率。正式表只读取 seed `42`；collector 继续兼容历史 `seed_*` 目录。四张宽表分别用于逐序列、来源数据集平均、全部序列官方平均和来源数据集 macro-average；任一分数缺少九项注册指标时不得视为可续跑的完整产物。

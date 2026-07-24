@@ -20,3 +20,4 @@ dependencies:
       - pynvml
       - tqdm==4.66.5
       - faiss-cpu
+      - TSB-AD==1.5

@@ -7,7 +7,7 @@ explicit lock, `pip freeze`, CUDA driver, and GPU UUID.
 
 | Method | Environment file | Notes |
 | --- | --- | --- |
-| SCAR / PaAno | `scar-paano-cu126.yml` | Formal target: Python 3.11, PyTorch 2.7.1, CUDA 12.6 |
+| SCAR / PaAno | `scar-paano-cu126.yml` | Formal target: Python 3.11, PyTorch 2.7.1, CUDA 12.6; includes TSB-AD 1.5 for Affiliation/VUS metrics |
 | CATCH | `catch-cu126.yml` | Official CATCH requirements on the same CUDA runtime |
 | PGRF-Net | `pgrf-cu126.yml` | Official modules with a project-side path adapter |
 | MEMTO | `memto-official.yml` / `memto-cu126-compat.yml` | Try official lock first; use compatibility lock only if the 4090 rejects it |

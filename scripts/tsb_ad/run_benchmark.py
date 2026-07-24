@@ -78,7 +78,11 @@ def _test_artifact_error(experiment_dir: Path, patch_sizes: list[int]) -> str | 
         return f"missing artifacts: {', '.join(missing)}"
     try:
         metrics = json.loads((experiment_dir / "test_metrics.json").read_text(encoding="utf-8"))
-        groups = score_metric_groups(metrics, require_core=True)
+        groups = score_metric_groups(
+            metrics,
+            require_core=True,
+            require_report_metrics=True,
+        )
         total_length = int(metrics["dataset_metadata"]["total_length"])
         if total_length < 1:
             return "dataset_metadata.total_length must be positive"

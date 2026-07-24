@@ -67,8 +67,18 @@ TEP_ABLATIONS = [
     "multi_scale",
 ]
 
-MAIN_METRIC_KEYS = ["pr_auc", "roc_auc", "best_f1"]
-TEP_MAIN_METRIC_KEYS = ["roc_auc", "pr_auc", "best_f1"]
+MAIN_METRIC_KEYS = [
+    "roc_auc",
+    "pr_auc",
+    "point_best_f1",
+    "pa_best_f1",
+    "aff_precision",
+    "aff_recall",
+    "aff_f1",
+    "vus_roc",
+    "vus_pr",
+]
+TEP_MAIN_METRIC_KEYS = list(MAIN_METRIC_KEYS)
 STABILITY_SUBSCORES = ["knn_distance", "state_novelty", "completion_scale8", "completion_scale32"]
 FUSION_FAMILY = ["raw_max", "zscore_mean", "cdf_max", "cdf_mean", "cdf_softmax"]
 TEP_MECHANISM_METRICS = [

@@ -621,7 +621,7 @@ split 目录额外生成 `results_long.csv` 和四张论文宽表；`run_record.
 
 TEP selected 历史序列结果可保留原评估字段；full 的故障序列均为全正类，因此不报告 `AUROC`、`AUPRC` 和 `F1`。full 重点报告窗口加权机制指标及对应的序列等权指标，避免 158 条完整序列与 10 条短序列的长度差异改变结论。
 
-论文表格和脚本中当前默认主报告分数为 `cdf_mean`，但所有正式 SCAR 运行必须同时保存并汇总 `raw_max`、`zscore_mean`、`cdf_mean`、`cdf_max` 以及 `completion_scale*`、`knn_distance`、`state_novelty` 和启用时的 `soft_support_score`。每个分数均输出其适用的 AUROC、AP、F1、VUS、Affiliation 和 Range 指标，不得只保留 selected 指标。P0 额外生成五主集、E1-E5 检索策略和 TEP 全分数表；P1 的 E29/E30/E31 均保留 SCAR/global 的完整分数列；TSB-AD 对每个可用分数生成逐序列、来源数据集、官方总体和 dataset-macro 表。`cdf_mean` 仍是预先固定的主结果，其余分数用于诊断和融合对照；不得逐 CSV、逐来源数据集或逐指标挑选最优策略。
+论文表格和脚本中当前默认主报告分数为 `cdf_mean`，但所有正式 SCAR 运行必须同时保存并汇总 `raw_max`、`zscore_mean`、`cdf_mean`、`cdf_max` 以及 `completion_scale*`、`knn_distance`、`state_novelty` 和启用时的 `soft_support_score`。每个融合分数和每个诊断子分数都必须配套输出九项注册指标：AUROC (`roc_auc`)、AP (`pr_auc`)、Point-F1 (`point_best_f1`)、PA-F1 (`pa_best_f1`)、Aff-P (`aff_precision`)、Aff-R (`aff_recall`)、Aff-F1 (`aff_f1`)、VUS-ROC (`vus_roc`) 和 VUS-PR (`vus_pr`)；缺少任一字段的正式产物不得复用。P0 额外生成五主集、E1-E5 检索策略和 TEP 全分数表；P1 的 E29/E30/E31 均保留 SCAR/global 的完整分数列，E30 macro 对九项指标逐分数聚合；TSB-AD 对每个可用分数生成逐序列、来源数据集、官方总体和 dataset-macro 表。`cdf_mean` 仍是预先固定的主结果，其余分数用于诊断和融合对照；不得逐 CSV、逐来源数据集或逐指标挑选最优策略。TEP 序列级单类或无连续时间邻接的协议仍保留全部字段，但不适用项必须写为 `NaN` 并记录原因，不能伪造数值。
 
 ## 12. 维护清单
 
@@ -834,7 +834,7 @@ GPU 的 NVML 时，会在启动 baseline 前失败。`--strict-dependencies 0` �
 - MMFDD-TEP：使用 M1-M6 和全部可用故障完成六模式全故障机制验证；
 - 五个主数据集：E9 和 E10 必须全部覆盖，相关基线性能与效率也必须全部覆盖。
 
-TSB-AD 统一报告 VUS-PR、VUS-ROC、AUROC 和 AP；主融合固定为 `cdf_mean`，不得按
+TSB-AD 对四类融合分数和全部诊断子分数统一报告 AUROC、AP、Point-F1、PA-F1、Aff-P、Aff-R、Aff-F1、VUS-ROC 和 VUS-PR；主融合固定为 `cdf_mean`，不得按
 CSV、来源数据集或指标选择融合方式。TAB 保留为论文修订或后续工作，不作为本轮
 rebuttal 必需项。完整任务矩阵和表格字段以 `rebuttal执行计划.md` 为准；远程服务器
 的去重运行顺序、产物复用关系、运行量核算和逐项验收以

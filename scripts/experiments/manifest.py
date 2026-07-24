@@ -178,7 +178,11 @@ def artifact_is_complete(spec: RunSpec) -> bool:
         if not isinstance(metrics, dict):
             return False
         try:
-            groups = score_metric_groups(metrics, require_core=True)
+            groups = score_metric_groups(
+                metrics,
+                require_core=True,
+                require_report_metrics=True,
+            )
         except KeyError:
             return False
         expected_subscores = {

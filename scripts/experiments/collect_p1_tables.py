@@ -10,7 +10,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.experiments.score_outputs import flatten_score_metrics
+from scripts.experiments.score_outputs import (
+    REQUIRED_REPORT_METRIC_KEYS,
+    flatten_score_metrics,
+)
 
 
 DATASETS = ("MSL", "PSM", "SMAP", "SMD", "SWAT")
@@ -50,6 +53,13 @@ def _write(path: Path, rows: list[dict]) -> None:
 
 def _synthetic_type(name: str) -> str:
     return name.removeprefix("synthetic_").split("0.")[0].rstrip("_")
+
+
+def _is_report_metric_column(key: str) -> bool:
+    return key in REQUIRED_REPORT_METRIC_KEYS or any(
+        key.endswith(f"_{metric_key}")
+        for metric_key in REQUIRED_REPORT_METRIC_KEYS
+    )
 
 
 def main() -> None:
@@ -125,10 +135,7 @@ def main() -> None:
                 metric_keys = sorted(
                     key
                     for key in rows[0]
-                    if key == "roc_auc"
-                    or key == "pr_auc"
-                    or key.endswith("_roc_auc")
-                    or key.endswith("_pr_auc")
+                    if _is_report_metric_column(key)
                 )
                 macro.append(
                     {

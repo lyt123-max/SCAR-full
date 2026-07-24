@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 from scripts.ablation.collect_results import build_records
+from scripts.experiments.score_outputs import REQUIRED_REPORT_METRIC_KEYS
 
 
 class AblationScoreCollectionTests(unittest.TestCase):
@@ -15,7 +16,7 @@ class AblationScoreCollectionTests(unittest.TestCase):
             root = Path(temp)
             experiment = root / "msl_ablation_full"
             experiment.mkdir()
-            metric = {"roc_auc": 0.8, "pr_auc": 0.7}
+            metric = {key: 0.8 for key in REQUIRED_REPORT_METRIC_KEYS}
             (experiment / "test_metrics.json").write_text(
                 json.dumps(
                     {
@@ -40,7 +41,7 @@ class AblationScoreCollectionTests(unittest.TestCase):
                 ablations=["full"],
                 experiment_name_template="{dataset_lower}_ablation_{ablation}",
                 score_keys=None,
-                metric_keys=["roc_auc", "pr_auc"],
+                metric_keys=list(REQUIRED_REPORT_METRIC_KEYS),
             )
             records = build_records(args)
             self.assertEqual(
@@ -55,6 +56,9 @@ class AblationScoreCollectionTests(unittest.TestCase):
                     "knn_distance",
                 },
             )
+            for record in records:
+                for metric_key in REQUIRED_REPORT_METRIC_KEYS:
+                    self.assertEqual(record[metric_key], 0.8)
 
 
 if __name__ == "__main__":

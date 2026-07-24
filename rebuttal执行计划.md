@@ -11,7 +11,9 @@
 >
 > 所有正式 SCAR 结果统一输出 `raw_max`、`zscore_mean`、`cdf_mean`、`cdf_max` 和
 > 全部诊断子分数的原始数组及逐分数指标。`cdf_mean` 是预注册主结果，但任何实验汇总
-> 都不得只保留 selected 指标。
+> 都不得只保留 selected 指标。每个融合分数和子分数必须配套包含 AUROC、AP、
+> Point-F1、PA-F1、Aff-P、Aff-R、Aff-F1、VUS-ROC、VUS-PR；正式完整性检查拒绝缺项。
+> TEP 序列级协议不适用的时序指标保留字段并写 `NaN` 与原因，不以伪造数值补齐。
 >
 > 面向远程服务器的去重运行顺序、复用关系、运行量核算和逐项勾选入口见
 > `rebuttal实验运行清单.md`。本文件负责“需要回答什么”，运行清单负责“怎样只跑一次并
@@ -890,7 +892,8 @@ E28 不进入 rebuttal 交付。若后续修订论文允许加图，再执行：
 3. 正式运行官方默认 U-Eva 350 条，不根据 SCAR 表现筛选；
 4. U-Eva-Full 822 仅保留为论文修订扩展，不进入 rebuttal P0；
 5. 与 TSB-AD benchmark 公开强基线比较，公开数字明确标记为 `reported`；
-6. 统一报告 VUS-PR、VUS-ROC、AUROC、AP、官方逐序列平均和来源数据集 macro-average；
+6. 对每个融合和子分数统一报告 AUROC、AP、Point-F1、PA-F1、Aff-P、Aff-R、Aff-F1、
+   VUS-ROC、VUS-PR，以及官方逐序列平均和来源数据集 macro-average；
 7. 分析 scalar gate 是否有贡献；
 8. 若结果一般，将单变量定位为已验证适用但性能仍有边界，不夸大普适性。
 
@@ -942,7 +945,7 @@ rebuttal 必需项。**
 
 报告：
 
-- VUS-PR、VUS-ROC、AUROC、AP；
+- 每个融合和子分数的 AUROC、AP、Point-F1、PA-F1、Aff-P、Aff-R、Aff-F1、VUS-ROC、VUS-PR；
 - 平均排名；
 - win/tie/loss；
 - 完整失败清单和失败原因；

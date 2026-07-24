@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
@@ -22,12 +22,17 @@ except Exception:
     HAS_SKLEARN = False
 
 try:
-    from vus.metrics import get_metrics as vus_get_metrics
+    from TSB_AD.evaluation.metrics import get_metrics as vus_get_metrics
 
     HAS_VUS = True
 except Exception:
-    vus_get_metrics = None
-    HAS_VUS = False
+    try:
+        from vus.metrics import get_metrics as vus_get_metrics
+
+        HAS_VUS = True
+    except Exception:
+        vus_get_metrics = None
+        HAS_VUS = False
 
 from coremad import CoReMADConfig
 from coremad.data import load_raw_dataset_bundle
@@ -65,6 +70,12 @@ def parse_args() -> argparse.Namespace:
         nargs="*",
         default=DEFAULT_SCORE_KEYS,
         help="Score keys to evaluate",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="JSON output path. Defaults to diagnostic_metrics.json beside the NPZ.",
     )
     return parser.parse_args()
 
@@ -169,26 +180,24 @@ def best_f1(labels: np.ndarray, scores: np.ndarray) -> tuple[float, float]:
     return float(np.nanmax(f1)), threshold
 
 
-def evaluate_one(labels: np.ndarray, scores: np.ndarray) -> tuple[float, float, float, dict[str, float]]:
-    if not HAS_SKLEARN:
-        raise RuntimeError("scikit-learn is required to compute ROC-AUC / PR-AUC.")
-    auc = float(roc_auc_score(labels, scores))
-    pr_auc = float(average_precision_score(labels, scores))
-    f1, _ = best_f1(labels, scores)
-    vus_metrics = compute_vus_metrics(labels, scores)
-    return auc, pr_auc, f1, vus_metrics
+def evaluate_one(labels: np.ndarray, scores: np.ndarray) -> dict[str, float | int]:
+    from coremad.evaluation import binary_point_metrics
+
+    return binary_point_metrics(labels, scores)
 
 
-def print_metric_row(name: str, labels: np.ndarray, scores: np.ndarray) -> None:
-    auc, pr_auc, f1, vus_metrics = evaluate_one(labels, scores)
+def print_metric_row(
+    name: str, labels: np.ndarray, scores: np.ndarray
+) -> dict[str, float | int]:
+    metrics = evaluate_one(labels, scores)
     print(
-        f"{name:30s} AUC={auc:.4f}  PR-AUC={pr_auc:.4f}  best-F1={f1:.4f}  "
-        f"Aff-F1={vus_metrics['aff_f1']:.4f}  "
-        f"Range-F1={vus_metrics['range_f1']:.4f}  "
-        f"R-AUC-ROC={vus_metrics['r_auc_roc']:.4f}  "
-        f"R-AUC-PR={vus_metrics['r_auc_pr']:.4f}  "
-        f"VUS-ROC={vus_metrics['vus_roc']:.4f}  VUS-PR={vus_metrics['vus_pr']:.4f}"
+        f"{name:30s} AUROC={metrics['roc_auc']:.4f}  AP={metrics['pr_auc']:.4f}  "
+        f"Point-F1={metrics['point_best_f1']:.4f}  PA-F1={metrics['pa_best_f1']:.4f}  "
+        f"Aff-P={metrics['aff_precision']:.4f}  Aff-R={metrics['aff_recall']:.4f}  "
+        f"Aff-F1={metrics['aff_f1']:.4f}  VUS-ROC={metrics['vus_roc']:.4f}  "
+        f"VUS-PR={metrics['vus_pr']:.4f}"
     )
+    return metrics
 
 
 def resolve_labels(npz_path: Path, data: np.lib.npyio.NpzFile, labels_key: str) -> np.ndarray:
@@ -233,30 +242,53 @@ def main() -> None:
     if not HAS_SKLEARN:
         raise RuntimeError("scikit-learn is not available in the current environment.")
     if not HAS_VUS:
-        print("[DiagEval] warning: `vus` is not installed, Aff-F1 / Range-F1 / R-AUC / VUS metrics will be NaN")
+        print(
+            "[DiagEval] warning: TSB-AD metrics are unavailable; "
+            "Aff-P/Aff-R/Aff-F1 and VUS metrics will be NaN"
+        )
 
     data = np.load(npz_path)
     labels = resolve_labels(npz_path, data, args.labels_key)
     print(f"[DiagEval] file={npz_path}")
     print(f"[DiagEval] labels_key={args.labels_key} positives={int(labels.sum())} total={len(labels)}")
 
+    results: dict[str, dict[str, float | int]] = {}
     for name in args.score_keys:
         if name not in data.files:
             print(f"{name:30s} SKIP missing key")
             continue
         scores = sanitize_scores(data[name])
-        print_metric_row(name, labels, scores)
+        results[name] = print_metric_row(name, labels, scores)
 
     comp8 = load_score_array(data, "completion_scale8")
     comp32 = load_score_array(data, "completion_scale32")
     if comp8 is not None and comp32 is not None:
         comp_avg = 0.5 * comp8 + 0.5 * comp32
-        print_metric_row("comp8+comp32 (simple avg)", labels, comp_avg)
+        results["completion_mean"] = print_metric_row(
+            "comp8+comp32 (simple avg)", labels, comp_avg
+        )
 
     knn = load_score_array(data, "knn_distance")
     if comp8 is not None and comp32 is not None and knn is not None:
         comp_mem = (comp8 + comp32 + knn) / 3.0
-        print_metric_row("comp8+comp32+knn (avg)", labels, comp_mem)
+        results["completion_knn_mean"] = print_metric_row(
+            "comp8+comp32+knn (avg)", labels, comp_mem
+        )
+
+    output = args.output or (npz_path.parent / "diagnostic_metrics.json")
+    output.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "source": str(npz_path.resolve()),
+                "scores": results,
+            },
+            indent=2,
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    print(f"[DiagEval] wrote metrics: {output}")
 
 
 if __name__ == "__main__":
