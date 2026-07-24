@@ -1687,11 +1687,13 @@ Reviewer dk9H 与另外两位审稿人一致，认为当前虽然基线数量多
 
 ## 阶段 3：补齐 CATCH 与完整 TEP
 
-1. E13-E14：运行当前五数据集之外的全部兼容 CATCH 真实数据；
-2. ASD 12 个子数据集全部运行并汇总 family macro-average；
-3. E15：运行六类、两个异常比例版本的 12 个 synthetic CSV；
+1. E13-E14：仅运行 SCAR 在当前五数据集之外的全部兼容 CATCH 真实数据；
+2. SCAR 在 ASD 12 个子数据集全部运行并汇总 family macro-average；
+3. E15：SCAR 运行六类、两个异常比例版本的 12 个 synthetic CSV；
 4. E16-E17：运行 MMFDD-TEP 六模式全故障并生成 T2/T9；
-5. 所有结果只以表格和文字摘要进入 rebuttal。
+5. CATCH 方法不创建训练任务，仅录入论文发布值并标记
+   `reported from CATCH`；
+6. 所有结果只以表格和文字摘要进入 rebuttal。
 
 ## 阶段 4：TSB-AD-M/U 综合基准
 

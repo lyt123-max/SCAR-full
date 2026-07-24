@@ -22,7 +22,7 @@ from scripts.experiments.runner import (
     summarize_tasks,
     write_plan,
 )
-from scripts.experiments.rebuttal import _apply_data_root_map, select_tasks
+from scripts.experiments.rebuttal import AC_CORE_GROUPS, _apply_data_root_map, select_tasks
 from scripts.experiments.budget import select_budget_candidate
 from scripts.experiments.protocol import (
     CORESET_KEEP_RATIOS,
@@ -326,6 +326,57 @@ class ManifestContractTests(unittest.TestCase):
             )
             self.assertEqual([row["status"] for row in results], ["completed", "completed"])
 
+    def test_parallel_executor_assigns_distinct_gpu_slots(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            tasks = []
+            for index in range(2):
+                output = root / f"task_{index}"
+                tasks.append(
+                    RunSpec(
+                        method="Toy",
+                        dataset=f"Toy{index}",
+                        seed=42,
+                        stage="analysis",
+                        group="test",
+                        compute_kind="analysis",
+                        config={"index": index},
+                        command=(
+                            sys.executable,
+                            "-c",
+                            (
+                                "import json, os; from pathlib import Path; "
+                                f"Path(r'{output / 'gpu.json'}').parent.mkdir(parents=True, exist_ok=True); "
+                                f"Path(r'{output / 'gpu.json'}').write_text(json.dumps("
+                                "{'gpu': os.environ.get('CUDA_VISIBLE_DEVICES')}))"
+                            ),
+                        ),
+                        artifact_dir=output,
+                        required_artifacts=("gpu.json",),
+                    )
+                )
+            results = execute_tasks(
+                tasks,
+                repo_root=root,
+                max_parallel=2,
+                gpu_devices=("2", "3"),
+            )
+            self.assertEqual({row["assigned_gpu"] for row in results}, {"2", "3"})
+            observed = {
+                json.loads((task.artifact_dir / "gpu.json").read_text())["gpu"]
+                for task in tasks
+            }
+            self.assertEqual(observed, {"2", "3"})
+
+    def test_gpu_slots_reject_oversubscription(self) -> None:
+        with self.assertRaisesRegex(ValueError, "cannot exceed"):
+            execute_tasks(
+                [],
+                repo_root=Path("."),
+                max_parallel=2,
+                gpu_devices=("0",),
+            )
+
     def test_plan_summary_separates_recomputation_kinds(self) -> None:
         tasks = build_p0_tasks(Path("/artifacts"), python_exe="python")
         summary = summarize_tasks(tasks)
@@ -449,6 +500,34 @@ class ManifestContractTests(unittest.TestCase):
         )
         self.assertEqual(len(tasks), 25)
         self.assertEqual({task.group for task in tasks}, {"e9"})
+
+    def test_ac_core_scope_and_shard_filters(self) -> None:
+        tasks = select_tasks(
+            scope="ac-core",
+            groups=None,
+            artifact_root=Path("/artifacts"),
+            python_exe="python",
+        )
+        self.assertEqual({task.group for task in tasks}, AC_CORE_GROUPS)
+        self.assertEqual(len(tasks), 108)
+        self.assertEqual(
+            sum(task.compute_kind == "full_model_fit" for task in tasks), 56
+        )
+        self.assertEqual(
+            sum(task.compute_kind == "stage_b_test" for task in tasks), 25
+        )
+
+        shard = select_tasks(
+            scope="ac-core",
+            groups={"baselines"},
+            artifact_root=Path("/artifacts"),
+            python_exe="python",
+            methods={"PaAno", "PGRF-Net"},
+            datasets={"SMD", "SWAT"},
+        )
+        self.assertEqual(len(shard), 4)
+        self.assertEqual({task.method for task in shard}, {"PaAno", "PGRF-Net"})
+        self.assertEqual({task.dataset for task in shard}, {"SMD", "SWAT"})
 
     def test_data_root_map_rewrites_commands_and_dependency_ids(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

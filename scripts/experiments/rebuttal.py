@@ -27,22 +27,42 @@ else:
     from .runner import execute_tasks, execution_is_reusable, freeze_environment, write_plan
 
 
+AC_CORE_GROUPS = {
+    "anchors",
+    "baselines",
+    "catch",
+    "efficiency",
+    "e9",
+    "e11_e12",
+    "mechanism",
+    "tep",
+}
+
+
 def select_tasks(
     *,
     scope: str,
     groups: set[str] | None,
     artifact_root: Path,
     python_exe: str,
+    methods: set[str] | None = None,
+    datasets: set[str] | None = None,
 ) -> list[RunSpec]:
-    if scope not in {"p0", "p1", "all"}:
-        raise ValueError("scope must be one of p0, p1, all")
+    if scope not in {"ac-core", "p0", "p1", "all"}:
+        raise ValueError("scope must be one of ac-core, p0, p1, all")
     tasks: list[RunSpec] = []
-    if scope in {"p0", "all"}:
+    if scope in {"ac-core", "p0", "all"}:
         tasks.extend(build_p0_tasks(artifact_root, python_exe=python_exe))
     if scope in {"p1", "all"}:
         tasks.extend(build_p1_tasks(artifact_root, python_exe=python_exe))
+    if scope == "ac-core":
+        tasks = [task for task in tasks if task.group in AC_CORE_GROUPS]
     if groups:
         tasks = [task for task in tasks if task.group in groups]
+    if methods:
+        tasks = [task for task in tasks if task.method in methods]
+    if datasets:
+        tasks = [task for task in tasks if task.dataset in datasets]
     if len({task.run_id for task in tasks}) != len(tasks):
         raise ValueError("Selected task set contains duplicate run IDs.")
     return tasks
@@ -241,8 +261,12 @@ def parse_args() -> argparse.Namespace:
     subparsers = parser.add_subparsers(dest="action", required=True)
     for action in ("plan", "run", "resume", "status", "validate", "collect"):
         command = subparsers.add_parser(action)
-        command.add_argument("--scope", choices=["p0", "p1", "all"], default="all")
+        command.add_argument(
+            "--scope", choices=["ac-core", "p0", "p1", "all"], default="all"
+        )
         command.add_argument("--group", nargs="+", default=None)
+        command.add_argument("--method", nargs="+", default=None)
+        command.add_argument("--dataset", nargs="+", default=None)
         command.add_argument("--artifact-root", type=Path, default=REPO_ROOT / "artifacts")
         command.add_argument(
             "--manifest-dir",
@@ -253,6 +277,7 @@ def parse_args() -> argparse.Namespace:
         command.add_argument("--python-map", type=Path, default=None)
         command.add_argument("--data-root-map", type=Path, default=None)
         command.add_argument("--max-parallel", type=int, default=1)
+        command.add_argument("--gpu-devices", nargs="+", default=None)
         command.add_argument("--dry-run", action="store_true")
         command.add_argument("--failed-only", action="store_true")
     return parser.parse_args()
@@ -265,6 +290,8 @@ def main() -> int:
         groups=set(args.group) if args.group else None,
         artifact_root=args.artifact_root.resolve(),
         python_exe=str(args.python),
+        methods=set(args.method) if args.method else None,
+        datasets=set(args.dataset) if args.dataset else None,
     )
     tasks = _apply_python_map(tasks, args.python_map)
     tasks = _apply_data_root_map(tasks, args.data_root_map)
@@ -302,6 +329,7 @@ def main() -> int:
         tasks,
         repo_root=REPO_ROOT,
         max_parallel=args.max_parallel,
+        gpu_devices=args.gpu_devices,
         resume=args.action == "resume",
         failed_only=args.failed_only,
         dry_run=args.dry_run,

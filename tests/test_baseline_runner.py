@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from scripts.rebuttal.baselines.run_baseline import FORMAL_METHODS, build_adapter_command
+from scripts.rebuttal.baselines.run_paano_adapter import parse_args as parse_paano_args
 
 
 class BaselineRunnerTests(unittest.TestCase):
@@ -36,6 +37,25 @@ class BaselineRunnerTests(unittest.TestCase):
                 seed=7,
                 device="cuda:0",
             )
+
+    def test_paano_adapter_matches_official_multivariate_hyperparameters(self) -> None:
+        import sys
+        from unittest.mock import patch
+
+        argv = [
+            "run_paano_adapter.py",
+            "--data-dir",
+            "/data",
+            "--output-dir",
+            "/out",
+            "--dataset",
+            "MSL",
+        ]
+        with patch.object(sys, "argv", argv):
+            args = parse_paano_args()
+        self.assertEqual(args.patch_size, 96)
+        self.assertEqual(args.num_iters, 100)
+        self.assertEqual(args.batch_size, 512)
 
 
 if __name__ == "__main__":

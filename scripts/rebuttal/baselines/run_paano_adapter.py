@@ -6,12 +6,20 @@ from pathlib import Path
 
 import numpy as np
 
-from common import (
-    REPO_ROOT,
-    measure_inference,
-    save_standard_outputs,
-    set_seed,
-)
+try:
+    from .common import (
+        REPO_ROOT,
+        measure_inference,
+        save_standard_outputs,
+        set_seed,
+    )
+except ImportError:
+    from common import (
+        REPO_ROOT,
+        measure_inference,
+        save_standard_outputs,
+        set_seed,
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -21,8 +29,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dataset", required=True)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", default="cuda:0")
-    parser.add_argument("--patch-size", type=int, default=64)
-    parser.add_argument("--num-iters", type=int, default=200)
+    parser.add_argument("--patch-size", type=int, default=96)
+    parser.add_argument("--num-iters", type=int, default=100)
     parser.add_argument("--batch-size", type=int, default=512)
     return parser.parse_args()
 
@@ -59,7 +67,7 @@ def main() -> None:
         train, full, labels, batch_size=args.batch_size
     )
     batch, _ = next(iter(train_loader))
-    model = paano.PatchEncoder(in_channels=batch.shape[1], use_revin=False).to(device)
+    model = paano.PatchEncoder(in_channels=batch.shape[1], use_revin=True).to(device)
     paano.train_model(
         model,
         train_loader,
@@ -99,7 +107,10 @@ def main() -> None:
         implementation={
             "upstream": "https://github.com/jinnnju/PaAno.git",
             "commit": "d4c67116190efa4592dc6a8a157ced0def68b6af",
-            "adapter": "official model/train/memory functions; test-only aligned export",
+            "adapter": (
+                "official run_mul hyperparameters (patch 96, 100 iterations, RevIN); "
+                "formal seed 42; test-only aligned export"
+            ),
         },
     )
 

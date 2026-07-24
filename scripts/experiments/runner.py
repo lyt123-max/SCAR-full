@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Sequence
 
 from .manifest import RunSpec, artifact_is_complete, artifact_is_reusable, canonical_json
 
@@ -341,11 +341,17 @@ def execute_task(
     repo_root: Path,
     resume: bool = False,
     dry_run: bool = False,
+    gpu_device: str | None = None,
 ) -> dict[str, Any]:
     if resume and execution_is_reusable(task, repo_root):
         return {**task.as_dict(), "status": "skipped_complete", "artifacts_complete": True}
     if dry_run:
-        return {**task.as_dict(), "status": "planned", "artifacts_complete": False}
+        return {
+            **task.as_dict(),
+            "status": "planned",
+            "artifacts_complete": False,
+            "assigned_gpu": gpu_device,
+        }
 
     task.artifact_dir.mkdir(parents=True, exist_ok=True)
     record_path = task.artifact_dir / "run_record.json"
@@ -357,6 +363,8 @@ def execute_task(
     runtime_environment = os.environ.copy()
     for key, value in task.metadata.get("environment", {}).items():
         runtime_environment[str(key)] = str(value)
+    if gpu_device is not None:
+        runtime_environment["CUDA_VISIBLE_DEVICES"] = str(gpu_device)
     if resume:
         runtime_environment["RESUME"] = "1"
     record = {
@@ -372,6 +380,7 @@ def execute_task(
         "executed_command": list(runtime_command),
         "resume_requested": bool(resume),
         "environment_overrides": task.metadata.get("environment", {}),
+        "assigned_gpu": gpu_device,
     }
     record["data_hash"], record["data_paths"] = data_fingerprint(task, repo_root)
     _atomic_json(record_path, record)
@@ -422,6 +431,7 @@ def execute_tasks(
     *,
     repo_root: Path,
     max_parallel: int = 1,
+    gpu_devices: Sequence[str] | None = None,
     resume: bool = False,
     failed_only: bool = False,
     dry_run: bool = False,
@@ -439,6 +449,13 @@ def execute_tasks(
         ]
     if max_parallel < 1:
         raise ValueError("max_parallel must be at least 1")
+    devices = tuple(str(device) for device in (gpu_devices or ()))
+    if len(set(devices)) != len(devices):
+        raise ValueError("gpu_devices must not contain duplicates")
+    if devices and max_parallel > len(devices):
+        raise ValueError(
+            "max_parallel cannot exceed the number of declared gpu_devices"
+        )
     selected_by_id = {task.run_id: task for task in selected}
     pending = dict(selected_by_id)
     states: dict[str, str] = {}
@@ -496,7 +513,13 @@ def execute_tasks(
         batch = ready[:max_parallel]
         if max_parallel == 1:
             batch_results = [
-                execute_task(batch[0], repo_root=repo_root, resume=resume, dry_run=dry_run)
+                execute_task(
+                    batch[0],
+                    repo_root=repo_root,
+                    resume=resume,
+                    dry_run=dry_run,
+                    gpu_device=devices[0] if devices else None,
+                )
             ]
         else:
             batch_results = []
@@ -508,8 +531,9 @@ def execute_tasks(
                         repo_root=repo_root,
                         resume=resume,
                         dry_run=dry_run,
+                        gpu_device=devices[index] if devices else None,
                     ): task
-                    for task in batch
+                    for index, task in enumerate(batch)
                 }
                 for future in as_completed(futures):
                     batch_results.append(future.result())

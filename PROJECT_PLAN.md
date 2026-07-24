@@ -863,6 +863,26 @@ python scripts/experiments/rebuttal.py validate --scope p0
 python scripts/experiments/rebuttal.py collect --scope p0
 ```
 
+针对三天时限内优先完成 AC 要求的队列，可使用 `--scope ac-core`。该范围固定为
+108 项：56 次 full model fit、25 次 Stage-B/Test 和 27 次 analysis。56 次完整训练
+由 5 个 SCAR 主数据集锚点、20 个相关 baseline、30 个 SCAR 在 CATCH 缺失 CSV
+上的补充结果和 1 个 TEP full 组成；**不包含任何 CATCH 方法训练**。计划输出中的
+`group:catch=31` 专指 30 个 SCAR 补充任务和 1 个数据完整性审计，CATCH 对照数字
+只使用论文发布结果并标为 `reported from CATCH`。
+
+双卡节点必须显式声明 GPU 槽位，调度器会为同批并发任务分别设置
+`CUDA_VISIBLE_DEVICES`，并拒绝并发数超过槽位数：
+
+```bash
+python scripts/experiments/rebuttal.py run \
+  --scope ac-core --max-parallel 2 --gpu-devices 0 1
+```
+
+两台服务器分片时使用 `--method`、`--dataset` 和 `--group` 限定任务集合；同一
+dataset 的 anchor、E9、机制和效率任务应保留在同一节点，以减少 checkpoint 和
+memory 传输。不同节点必须使用相同 Git commit、数据 hash、正式 seed `42` 和
+环境锁文件。
+
 每项任务使用稳定 `run_id`，保存完整命令、配置/数据/源码哈希、Git commit 与 dirty
 状态、环境快照、日志、状态和产物路径。`resume` 只有在 `run_record.json` 的
 `run_id`、配置哈希、当前源码哈希和当前数据哈希一致，且 JSON/NPY/NPZ 等全部必需
@@ -901,6 +921,10 @@ bash scripts/experiments/remote_smoke.sh
 PGRF-Net 通过项目侧 adapter 使用只读上游源码，统一导出 `scores.npy`、`labels.npy`、
 AUROC/AP、1 次预热加 3 次计时、资源 JSON 和运行 manifest。CATCH adapter 仅作为
 论文修订复现工具保留，不进入正式 manifest。
+
+PaAno 正式适配遵循其官方 multivariate 启动脚本的 `patch_size=96`、
+`num_iters=100`、`batch_size=512`、`lr=1e-4` 和 RevIN 设置；仅随机种子按本项目
+预注册协议统一为 `42`，不采用上游示例的 `2027`。
 
 当前中央 manifest 共 1225 项：P0 为 898 项，P1 为 327 项；其中实际重计算口径为
 P0 的 654 次 full model fit 与 180 次 Stage-B/Test，新增的 E10 冻结协议和 P0

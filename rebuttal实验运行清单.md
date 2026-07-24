@@ -313,6 +313,33 @@ TSB-AD；若 TSB-AD 比较多组配置，须按上一节公式增加 tuning 运�
 6. TSB-AD 冒烟通过后尽早启动长队列，按文件粒度断点续跑；
 7. 所有 P0 表格齐全后再决定是否启动 P1。
 
+### 12.1 三天 AC-core 双服务器队列
+
+`--scope ac-core` 只包含 AC 明确要求的证据链，共 108 项：
+
+| 任务 | 数量 | 口径 |
+| --- | ---: | --- |
+| SCAR 五主集 anchor | 5 full | 同时保存 full audit 和资源记录 |
+| PaAno/MEMTO/PUAD/PGRF-Net | 20 full | 四方法 × 五主集 |
+| SCAR 补充 CATCH 缺失 CSV | 30 full | CATCH 方法本身不训练 |
+| TEP full | 1 full | 六模式联合、168 条故障序列 |
+| E9 | 25 Stage-B/Test | 默认点复用 anchor |
+| 检索机制证据 | 20 analysis/inference | 三策略性能与代理指标 |
+| 效率、E11/E12、数据审计 | 7 analysis | 不新增模型训练 |
+
+每台双卡服务器使用：
+
+```bash
+python scripts/experiments/rebuttal.py run \
+  --scope ac-core --max-parallel 2 --gpu-devices 0 1 \
+  --python-map environments/python-map.remote.json \
+  --data-root-map environments/data-root-map.remote.json
+```
+
+正式分片必须再传 `--group`、`--method` 或 `--dataset`，保证两台服务器不生成
+重复 run-id。`group:catch=31` 是 30 个 SCAR 补充实验加 1 个完整性审计，不是
+CATCH baseline 重跑。
+
 ## 13. 最终验收
 
 - [ ] manifest 中没有重复的
