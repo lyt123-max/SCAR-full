@@ -3,6 +3,9 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
+import numpy as np
+
+from scripts.rebuttal.baselines.common import fixed_seed_inference
 from scripts.rebuttal.baselines.run_baseline import FORMAL_METHODS, build_adapter_command
 from scripts.rebuttal.baselines.run_paano_adapter import parse_args as parse_paano_args
 
@@ -77,6 +80,10 @@ class BaselineRunnerTests(unittest.TestCase):
         self.assertEqual(args.patch_size, 96)
         self.assertEqual(args.num_iters, 100)
         self.assertEqual(args.batch_size, 512)
+
+    def test_fixed_seed_inference_replays_stochastic_upstream_path(self) -> None:
+        infer = fixed_seed_inference(lambda: np.random.random(8), seed=42)
+        np.testing.assert_array_equal(infer(), infer())
 
 
 if __name__ == "__main__":

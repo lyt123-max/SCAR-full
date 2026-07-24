@@ -51,6 +51,18 @@ def set_seed(seed: int) -> None:
         pass
 
 
+def fixed_seed_inference(
+    function: Callable[[], np.ndarray],
+    *,
+    seed: int,
+) -> Callable[[], np.ndarray]:
+    def seeded_function() -> np.ndarray:
+        set_seed(seed)
+        return function()
+
+    return seeded_function
+
+
 def measure_inference(
     function: Callable[[], np.ndarray],
     *,

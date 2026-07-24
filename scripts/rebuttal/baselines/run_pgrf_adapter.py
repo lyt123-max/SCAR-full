@@ -10,6 +10,7 @@ from sklearn.preprocessing import StandardScaler
 
 from common import (
     REPO_ROOT,
+    fixed_seed_inference,
     load_common_data,
     measure_inference,
     save_standard_outputs,
@@ -111,7 +112,11 @@ def main() -> None:
         weights = explanation / (explanation.sum(axis=-1, keepdims=True) + 1e-8)
         return 0.9 * predictive + 0.1 * np.sum(weights * explanation, axis=-1)
 
-    scores, timing = measure_inference(infer)
+    # The upstream model samples Gumbel prototype weights even in eval mode.
+    # Reset the inference RNG so warmup and timed passes score the same model draw.
+    scores, timing = measure_inference(
+        fixed_seed_inference(infer, seed=args.seed)
+    )
     save_standard_outputs(
         output_dir=args.output_dir,
         method="PGRF-Net",
@@ -124,6 +129,10 @@ def main() -> None:
             "upstream": "https://github.com/jahoonjeong/PGRF-Net.git",
             "commit": "5dc6f7522d20043eb31f6b2b13091c80ad394dcb",
             "adapter": "official model/training/inference with project-side paths",
+            "inference_rng": (
+                "seed reset before each pass because upstream eval uses "
+                "gumbel_softmax"
+            ),
         },
     )
 

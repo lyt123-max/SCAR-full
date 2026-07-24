@@ -941,6 +941,10 @@ AUROC/AP、1 次预热加 3 次计时、资源 JSON 和运行 manifest。CATCH a
 MEMTO/PUAD 运行 1 epoch，PGRF-Net 两阶段各运行 1 epoch 且 patience 为 1。正式
 中央 manifest 不传该参数，仍使用各 adapter 的完整默认训练量。
 
+PGRF-Net 上游模型在 `eval()` 中仍通过 `gumbel_softmax` 采样原型权重。项目侧
+adapter 在每次预热/计时推理前重置 seed 42，使同一 checkpoint 的三次计时使用
+同一采样结果；不修改上游源码，且在运行 manifest 中明确记录该兼容处理。
+
 SCAR/PaAno 环境固定 NumPy `1.26.4`，以满足 `TSB-AD==1.5` 声明的
 `numpy>=1.24.3,<2.0` 约束；PaAno 所需 statsmodels 固定为 `0.14.5`。若使用 pip
 构建兼容环境，必须明确配对 torch `2.7.1`、torchvision `0.22.1` 和 torchaudio
