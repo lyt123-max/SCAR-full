@@ -125,6 +125,14 @@ def _format_command(command: list[str]) -> str:
     return subprocess.list2cmdline(command) if sys.platform == "win32" else shlex.join(command)
 
 
+def _select_shard(names: list[str], shard_count: int, shard_index: int) -> list[str]:
+    if shard_count < 1:
+        raise ValueError("--shard-count must be at least 1")
+    if not 0 <= shard_index < shard_count:
+        raise ValueError("--shard-index must be in [0, shard-count)")
+    return names[shard_index::shard_count]
+
+
 def _write_record(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = path.with_suffix(".json.tmp")
@@ -173,6 +181,8 @@ def _build_command(
     ]
     if args.device:
         command.extend(["--device", args.device])
+    if args.protocol == "formal-rebuttal":
+        command.extend(["--export_visualizations", "0"])
     if args.max_train_windows:
         command.extend(["--max_train_windows", str(args.max_train_windows)])
     if args.max_test_windows:
@@ -184,7 +194,8 @@ def run(args: argparse.Namespace) -> int:
     edition = normalize_edition(args.edition)
     split = normalize_split(args.split)
     validate_protocol(args.protocol, edition, split, args.seeds)
-    names = read_manifest(edition, split)
+    full_names = read_manifest(edition, split)
+    names = _select_shard(full_names, args.shard_count, args.shard_index)
     data_dir = resolve_data_dir(args.data_root or default_data_root(edition), edition)
     validate_local_files(data_dir, names)
     if args.limit is not None:
@@ -198,7 +209,8 @@ def run(args: argparse.Namespace) -> int:
     completed = skipped = failed = 0
     print(
         f"[TSB-AD] edition={edition} split={split} files={len(names)} "
-        f"seeds={args.seeds} stage={args.stage} total_runs={total}"
+        f"seeds={args.seeds} stage={args.stage} total_runs={total} "
+        f"shard={args.shard_index}/{args.shard_count}"
     )
 
     for seed in args.seeds:
@@ -228,6 +240,8 @@ def run(args: argparse.Namespace) -> int:
                 "source_dataset": metadata["source_dataset"],
                 "seed": seed,
                 "stage": args.stage,
+                "shard_index": args.shard_index,
+                "shard_count": args.shard_count,
                 "status": "running",
                 "started_at": _utc_now(),
                 "command": command,
@@ -269,7 +283,7 @@ def run(args: argparse.Namespace) -> int:
                 failed += 1
                 print(f"{prefix} failed to launch or monitor subprocess: {exc}")
                 if args.fail_fast:
-                    if args.stage in {"full", "test"}:
+                    if args.stage in {"full", "test"} and not args.skip_collect:
                         collect(artifact_root, edition, split)
                     return 1
                 continue
@@ -297,11 +311,11 @@ def run(args: argparse.Namespace) -> int:
                 failed += 1
                 print(f"{prefix} failed (return_code={return_code}, complete={complete})")
                 if args.fail_fast:
-                    if args.stage in {"full", "test"}:
+                    if args.stage in {"full", "test"} and not args.skip_collect:
                         collect(artifact_root, edition, split)
                     return 1
 
-    if not args.dry_run and args.stage in {"full", "test"}:
+    if not args.dry_run and not args.skip_collect and args.stage in {"full", "test"}:
         summary = collect(artifact_root, edition, split)
         print(f"[TSB-AD] collection: {json.dumps(summary)}")
     print(f"[TSB-AD] completed={completed} skipped={skipped} failed={failed}")
@@ -329,6 +343,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--fail-fast", action="store_true")
+    parser.add_argument("--shard-count", type=int, default=1)
+    parser.add_argument("--shard-index", type=int, default=0)
+    parser.add_argument(
+        "--skip-collect",
+        action="store_true",
+        help="Skip split-level collection so disjoint workers can collect once after joining.",
+    )
     parser.add_argument("--seq-len", type=int, default=128)
     parser.add_argument("--patch-sizes", type=int, nargs="+", default=[8, 32])
     parser.add_argument("--batch-size", type=int, default=128)

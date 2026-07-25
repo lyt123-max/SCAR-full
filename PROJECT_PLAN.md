@@ -552,7 +552,7 @@ python run.py --stage full --data_format tsb_ad \
 
 | 脚本/目录 | 功能 |
 | --- | --- |
-| `run_benchmark.py` | 按 edition、split 和 seed 为每个 CSV 启动独立子进程，记录日志、耗时、失败状态并支持断点续跑；未指定 seed 时正式默认只运行 `42`。 |
+| `run_benchmark.py` | 按 edition、split 和 seed 为每个 CSV 启动独立子进程，记录日志、耗时、失败状态并支持断点续跑；支持官方 manifest 互斥分片和延迟统一汇总，未指定 seed 时正式默认只运行 `42`，并自动关闭正式 rebuttal 可视化。 |
 | `collect_results.py` | 固定汇总四种正式融合策略和全部诊断子分数，默认只收集 `seed_42` 并生成长表以及逐序列、来源数据集、官方总体和数据集 macro-average 四张宽表；`--all-seeds` 仅用于历史产物审计。 |
 | `validate_setup.py` | 校验本地 M/U 文件清单、官方 split 数量和 CSV 通道结构。 |
 | `common.py` | 维护文件名协议、官方清单映射和数据目录解析。 |

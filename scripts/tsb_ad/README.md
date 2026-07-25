@@ -60,6 +60,12 @@ python scripts/tsb_ad/run_benchmark.py --edition M --split eval --seed 42 --devi
 python scripts/tsb_ad/run_benchmark.py --edition U --split eval --seed 42 --device cuda --resume
 ```
 
+四卡运行时，每张卡使用唯一的 `--shard-index 0..3` 和共同的
+`--shard-count 4 --skip-collect`。四个 worker 依次运行 M/U 的 tuning 和 eval；
+全部退出后再分别调用一次 `collect_results.py`。分片按官方 manifest 行号轮转，
+并集等于完整 split、交集为空。正式协议自动向模型命令传入
+`--export_visualizations 0`，只保留表格、文本、逐点分数和审计产物。
+
 正式评估前可分别在 M tuning 20 和 U tuning 48 上验证预注册配置。若比较多组配置，
 总运行量必须按配置数成倍登记，不能把多配置搜索计作一次 tuning。
 

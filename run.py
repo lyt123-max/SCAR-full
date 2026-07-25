@@ -40,6 +40,13 @@ def parse_args() -> argparse.Namespace:
         default=0.1,
         help="Resource sampling interval in seconds.",
     )
+    parser.add_argument(
+        "--export_visualizations",
+        type=int,
+        default=1,
+        choices=[0, 1],
+        help="Export training curves and test score plots.",
+    )
     parser.add_argument("--seq_len", type=int, default=128)
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--train_batch_size", type=int, default=None)
@@ -152,6 +159,7 @@ def main() -> None:
         resume=bool(args.resume),
         resource_monitor_enabled=bool(args.resource_monitor),
         resource_sample_interval=args.resource_sample_interval,
+        export_visualizations=bool(args.export_visualizations),
         seq_len=args.seq_len,
         batch_size=train_batch_size,
         train_batch_size=train_batch_size,

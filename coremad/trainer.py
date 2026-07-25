@@ -762,7 +762,8 @@ class CoReMADTrainer:
             monitor_key=monitor_key,
         )
         self.save_stage_a_checkpoint(final_last_payload, self.config.stage_a_last_path)
-        plot_training_curves(history, self.config.experiment_dir / "stage_a_loss_curve.png")
+        if self.config.export_visualizations:
+            plot_training_curves(history, self.config.experiment_dir / "stage_a_loss_curve.png")
         return trained
 
     def _run_stage_a_epoch(self, model: CoReMADModel, loader: DataLoader, optimizer: AdamW) -> dict[str, float]:
@@ -1621,7 +1622,8 @@ class CoReMADTrainer:
                 json.dumps(metrics, indent=2, ensure_ascii=False),
                 encoding="utf-8",
             )
-            self._export_test_visualizations(selected_scores, raw_bundle.test_labels, final_diags)
+            if self.config.export_visualizations:
+                self._export_test_visualizations(selected_scores, raw_bundle.test_labels, final_diags)
         if sequence_metrics:
             selected_metrics = sequence_metrics["selected"]
             print(
@@ -1846,6 +1848,7 @@ class CoReMADTrainer:
             "memory_audit_mode",
             "resource_monitor_enabled",
             "resource_sample_interval",
+            "export_visualizations",
         )
         for field_name in runtime_override_fields:
             setattr(restored, field_name, getattr(current, field_name))

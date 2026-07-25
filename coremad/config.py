@@ -100,6 +100,7 @@ class CoReMADConfig:
     resume: bool = False
     resource_monitor_enabled: bool = True
     resource_sample_interval: float = 0.1
+    export_visualizations: bool = True
 
     def __post_init__(self) -> None:
         self.dataset = str(self.dataset).strip()
@@ -137,6 +138,7 @@ class CoReMADConfig:
         if self.memory_audit_mode not in {"none", "summary", "full"}:
             raise ValueError("memory_audit_mode must be one of {'none', 'summary', 'full'}.")
         self.resource_monitor_enabled = bool(self.resource_monitor_enabled)
+        self.export_visualizations = bool(self.export_visualizations)
         self.resource_sample_interval = float(self.resource_sample_interval)
         if self.resource_sample_interval <= 0.0:
             raise ValueError("resource_sample_interval must be positive.")

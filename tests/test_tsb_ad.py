@@ -19,7 +19,7 @@ sys.path.insert(0, str(SCRIPT_DIR))
 
 from collect_results import METRIC_KEYS, SCORE_KEYS, collect
 from common import MANIFESTS, parse_file_name, read_manifest
-from run_benchmark import _is_complete, _required_test_files, validate_protocol
+from run_benchmark import _is_complete, _required_test_files, _select_shard, validate_protocol
 
 
 def _import_data_module_without_torch():
@@ -130,6 +130,19 @@ class TSBADLoaderTests(unittest.TestCase):
 
 
 class TSBADOutputTests(unittest.TestCase):
+    def test_manifest_shards_are_disjoint_and_complete(self):
+        names = [f"series_{index}" for index in range(23)]
+        shards = [_select_shard(names, 4, index) for index in range(4)]
+        self.assertEqual(sum(map(len, shards)), len(names))
+        self.assertEqual(set().union(*map(set, shards)), set(names))
+        for left in range(4):
+            for right in range(left + 1, 4):
+                self.assertFalse(set(shards[left]) & set(shards[right]))
+        with self.assertRaisesRegex(ValueError, "shard-count"):
+            _select_shard(names, 0, 0)
+        with self.assertRaisesRegex(ValueError, "shard-index"):
+            _select_shard(names, 4, 4)
+
     def test_formal_runner_rejects_eval_full_and_nonformal_seed(self):
         with self.assertRaisesRegex(ValueError, "eval_full"):
             validate_protocol("formal-rebuttal", "U", "eval_full", [42])
