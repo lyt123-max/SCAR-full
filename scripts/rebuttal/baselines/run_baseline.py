@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-FORMAL_METHODS = ("PaAno", "MEMTO", "PUAD", "PGRF-Net")
+FORMAL_METHODS = ("PaAno", "PUAD", "PGRF-Net")
 ADAPTERS = {
     "PaAno": "run_paano_adapter.py",
     "MEMTO": "run_memto_adapter.py",

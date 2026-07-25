@@ -22,8 +22,9 @@
   `M/tuning`、`M/eval`、`U/tuning`、`U/eval`；`U/eval_full` 仅保留为论文修订
   扩展，不进入 rebuttal P0。
 - [x] **G6 基线适配器**：已完成 PaAno、MEMTO、PUAD、PGRF-Net 的五数据集
-  数据适配、统一逐点评估和资源包装，固定上游 commit 和独立环境；CATCH adapter
-  仅保留为论文修订复现工具，不进入正式 rebuttal 队列。
+  数据适配、统一逐点评估和资源包装，固定上游 commit 和独立环境；正式队列只运行
+  PaAno、PUAD、PGRF-Net，MEMTO 与 CATCH adapter 仅保留作历史审计，不进入正式
+  rebuttal 队列。
 - [x] **G7 批量 manifest**：每行固定
   `run_id/method/dataset/seed/stage/config_hash/data_hash/command/artifact_dir/status`；
   runner 支持 dry-run、resume、失败清单和完整产物跳过。
@@ -60,7 +61,7 @@
 | E9 其余非默认点 | 20 Stage-B/Test | 净化敏感性 | E11 稀有正常误删统计 |
 | E10 非零污染产物 | 135 Stage-B/Test | 污染鲁棒性 | E12 低误差异常存活统计 |
 | E38 非默认点 | 20 Stage-B/Test | memory keep ratio | E39 bank size/latency/RAM 表 |
-| 五数据集相关 baseline | 20 full | 性能比较 | 同一 checkpoint 做资源计时 |
+| 五数据集相关 baseline | 15 full | 性能比较 | 同一 checkpoint 做资源计时 |
 | CATCH 官方发布结果 | 0 | 扩展数据集 CATCH 对照 | 标为 `reported`，不冒充统一协议重跑 |
 
 ## 4. P0-1 五数据集 SCAR 锚点
@@ -181,10 +182,10 @@ python scripts/rebuttal/muqn/run_contamination_sweep.py \
 
 ## 6. P0-3 五数据集相关基线与效率
 
-方法固定为 PaAno、MEMTO、PUAD、PGRF-Net；SCAR 读取 P0-1。CATCH 不重跑，
-仅使用官方发布结果作为 `reported from CATCH` 对照。
+方法固定为 PaAno、PUAD、PGRF-Net；SCAR 读取 P0-1。MEMTO 不运行，其既有失败
+产物不得进入结果；CATCH 不重跑，仅使用官方发布结果作为 `reported from CATCH` 对照。
 
-- [ ] 每种方法在五个主数据集只训练一次 seed `42`，共 20 次 full。
+- [ ] 每种方法在五个主数据集只训练一次 seed `42`，共 15 次 full。
 - [ ] full 同时保存性能、训练时间、峰值 GPU/CPU 内存和模型大小。
 - [ ] 每个 checkpoint 做 1 次预热和 3 次推理计时，不重新训练。
 - [ ] 使用相同测试标签、AUROC/AP evaluator 和数据集级汇总规则。
@@ -288,7 +289,7 @@ python scripts/tsb_ad/run_benchmark.py \
 | 类型 | 数量 | 说明 |
 | --- | ---: | --- |
 | SCAR 五数据集锚点 | 5 full | 解锁机制、净化、污染、memory 和资源实验 |
-| 五数据集相关 baseline | 20 full | 4 方法 × 5 数据集；CATCH 只引用官方结果 |
+| 五数据集相关 baseline | 15 full | 3 方法 × 5 数据集；MEMTO 不运行，CATCH 只引用官方结果 |
 | CATCH 缺失 CSV 的 SCAR | 30 full | 不重复当前五数据集 |
 | TEP full | 1 full | 一套模型测试 168 条故障序列 |
 | TSB-AD SCAR | 598 full | tuning 68 + official eval 530；按一个预注册配置核算 |
@@ -299,7 +300,7 @@ python scripts/tsb_ad/run_benchmark.py \
 | E11/E12/E39 | 0 training | 全部从已有产物派生 |
 
 按 TSB-AD 每个 track 只验证一个预注册配置核算，完整 P0 为
-**654 次 full model fit + 180 次 Stage-B/Test**，即 834 次重计算任务。其中 598 次
+**649 次 full model fit + 180 次 Stage-B/Test**，即 829 次重计算任务。其中 598 次
 full 来自 SCAR 的官方 TSB-AD tuning/evaluation。PaAno 只在五个主数据集运行，不补
 TSB-AD；若 TSB-AD 比较多组配置，须按上一节公式增加 tuning 运行量。
 
@@ -315,12 +316,12 @@ TSB-AD；若 TSB-AD 比较多组配置，须按上一节公式增加 tuning 运�
 
 ### 12.1 三天 AC-core 双服务器队列
 
-`--scope ac-core` 只包含 AC 明确要求且依赖闭环的证据链，共 107 项：
+`--scope ac-core` 只包含 AC 明确要求且依赖闭环的证据链，共 102 项：
 
 | 任务 | 数量 | 口径 |
 | --- | ---: | --- |
 | SCAR 五主集 anchor | 5 full | 同时保存 full audit 和资源记录 |
-| PaAno/MEMTO/PUAD/PGRF-Net | 20 full | 四方法 × 五主集 |
+| PaAno/PUAD/PGRF-Net | 15 full | 三方法 × 五主集；MEMTO 不运行 |
 | SCAR 补充 CATCH 缺失 CSV | 30 full | CATCH 方法本身不训练 |
 | TEP full | 1 full | 六模式联合、168 条故障序列 |
 | E9 | 25 Stage-B/Test | 默认点复用 anchor |
@@ -370,7 +371,7 @@ bash scripts/experiments/remote_smoke.sh
 ```
 
 随后按 P0、P1 顺序使用 `rebuttal.py run|resume|status|validate|collect`。中央 manifest
-是任务数量和复用关系的唯一口径；P0 固定为 654 个 full model fit 与 180 个
+是任务数量和复用关系的唯一口径；P0 固定为 649 个 full model fit 与 180 个
 Stage-B/Test，P1 数量只读取 manifest，不手工累计。P0 完成后运行
 `--group p0_tables`，严格生成主五集、baseline、效率、CATCH、E9/E10 和 TSB 的
 CSV 与文字摘要，并单独生成 E1-E5 检索策略全分数表和 TEP 全分数表；缺项时该任务失败。

@@ -763,9 +763,10 @@ MSL、PSM、SMAP、SMD、SWaT 五个主数据集完整运行。污染率固定�
 
 ### 15.4 基线边界
 
-五个主数据集的正式相关基线固定优先运行 PaAno、MEMTO、PUAD 和 PGRF-Net，
+五个主数据集的正式相关基线固定运行 PaAno、PUAD 和 PGRF-Net，
 并与 SCAR 在相同远程服务器上同步记录性能、时间、GPU/CPU 内存和产物大小。CATCH
-不重跑，只引用官方 benchmark 结果并标记为 `reported from CATCH`。PaAno
+不重跑，只引用官方 benchmark 结果并标记为 `reported from CATCH`。MEMTO 不进入
+正式运行或结果汇总，其源码、adapter 和既有失败目录只保留作历史审计。PaAno
 使用官方多变量实现。DAMP 官方 `DAMP_Multidim.m` 和 GDFlex 均依赖 MATLAB；当前没有
 可用 MATLAB 环境，因此只保留只读适配和协议审计，不生成未经官方环境验证的替代实现
 数字，也不把“缺少 MATLAB”描述成任务协议不兼容。GDFlex 还需单独说明其官方入口绑定
@@ -834,7 +835,7 @@ GPU 的 NVML 时，会在启动 baseline 前失败。`--strict-dependencies 0` �
 1. 五个主数据集的 SCAR Stage-A 每个数据集只训练一次 seed `42`；
 2. 检索机制、净化、污染和 memory keep ratio 复用相同 checkpoint，仅重建 Stage-B
    或重新推理；
-3. SCAR 与 PaAno、MEMTO、PUAD、PGRF-Net 首次正式训练即启用资源监控，同一次
+3. SCAR 与 PaAno、PUAD、PGRF-Net 首次正式训练即启用资源监控，同一次
    运行同时产生性能和效率结果；CATCH 不重跑、不进入本次资源实测；
 4. 所有任务保存配置、环境、checkpoint、逐点 score、memory provenance、失败日志和
    `resource_metrics.json`。
@@ -864,7 +865,7 @@ rebuttal 必需项。完整任务矩阵和表格字段以 `rebuttal执行计划.
 `clean_ratio=0` 的逐点分数按三折 mask 重评估，只运行 135 个非零污染
 Stage-B/Test；E38 复用 `coreset_keep_ratio=1.0`，只新增 20 个 Stage-B/Test；
 按 M/U 各验证一个预注册配置核算，TSB-AD 为 tuning 68 加 official evaluation 530，
-共 598 次 full。完整 P0 为 654 次 full model fit 和 180 次 Stage-B/Test；若在 tuning
+共 598 次 full。完整 P0 为 649 次 full model fit 和 180 次 Stage-B/Test；若在 tuning
 清单比较多组配置，额外运行量按 `20×H_M + 48×H_U` 计算并单独登记。
 
 ## 18. Rebuttal 统一实验入口
@@ -881,8 +882,8 @@ python scripts/experiments/rebuttal.py collect --scope p0
 ```
 
 针对三天时限内优先完成 AC 要求的队列，可使用 `--scope ac-core`。该范围固定为
-107 项：56 次 full model fit、25 次 Stage-B/Test 和 26 次 analysis。56 次完整训练
-由 5 个 SCAR 主数据集锚点、20 个相关 baseline、30 个 SCAR 在 CATCH 缺失 CSV
+102 项：51 次 full model fit、25 次 Stage-B/Test 和 26 次 analysis。51 次完整训练
+由 5 个 SCAR 主数据集锚点、15 个相关 baseline、30 个 SCAR 在 CATCH 缺失 CSV
 上的补充结果和 1 个 TEP full 组成；**不包含任何 CATCH 方法训练**。计划输出中的
 `group:catch=31` 专指 30 个 SCAR 补充任务和 1 个数据完整性审计，CATCH 对照数字
 只使用论文发布结果并标为 `reported from CATCH`。
@@ -937,24 +938,25 @@ bash scripts/experiments/remote_smoke.sh
 
 正式环境目标为 Python 3.11、PyTorch 2.7.1、CUDA 12.6。环境输入规格位于
 `environments/`；创建环境后使用 `scripts/experiments/freeze_conda_env.py` 保存
-平台相关 explicit lock、pip freeze、驱动版本和 GPU UUID。PaAno/MEMTO/PUAD/
-PGRF-Net 通过项目侧 adapter 使用只读上游源码，统一导出 `scores.npy`、`labels.npy`、
+平台相关 explicit lock、pip freeze、驱动版本和 GPU UUID。PaAno、PUAD、PGRF-Net
+通过项目侧 adapter 使用只读上游源码，统一导出 `scores.npy`、`labels.npy`、
 AUROC/AP、1 次预热加 3 次计时、资源 JSON 和运行 manifest。CATCH adapter 仅作为
 论文修订复现工具保留，不进入正式 manifest。
 
 `run_baseline.py --smoke` 仅用于远程模型级兼容性检查：PaAno 运行 1 iteration，
-MEMTO/PUAD 运行 1 epoch，PGRF-Net 两阶段各运行 1 epoch 且 patience 为 1。正式
+PUAD 运行 1 epoch，PGRF-Net 两阶段各运行 1 epoch 且 patience 为 1。正式
 中央 manifest 不传该参数，仍使用各 adapter 的完整默认训练量。
 
 PGRF-Net 上游模型在 `eval()` 中仍通过 `gumbel_softmax` 采样原型权重。项目侧
 adapter 在每次预热/计时推理前重置 seed 42，使同一 checkpoint 的三次计时使用
 同一采样结果；不修改上游源码，且在运行 manifest 中明确记录该兼容处理。
 
-MEMTO 固定使用官方两阶段协议：每阶段最大 100 epoch、10 个 memory item，第一/
+MEMTO 的历史 adapter 固定使用官方两阶段协议：每阶段最大 100 epoch、10 个 memory item，第一/
 第二阶段学习率分别为 `1e-4`/`5e-5`。上游 batch 256 由四卡 DataParallel 分摊，
 单卡 adapter 使用等效的每卡 batch 64；第二阶段显式设为 `second_train`，推理前
 切换为 `test` 以冻结 memory，并将非 parameter 的 memory tensor 随 checkpoint
-保存。k-means 与官方一致只读取训练窗口的 10%。
+保存。k-means 与官方一致只读取训练窗口的 10%。该 adapter 仅供历史审计，MEMTO
+不进入正式 manifest、资源比较或 rebuttal 结果。
 
 SCAR/PaAno 环境固定 NumPy `1.26.4`，以满足 `TSB-AD==1.5` 声明的
 `numpy>=1.24.3,<2.0` 约束；PaAno 所需 statsmodels 固定为 `0.14.5`。若使用 pip
@@ -965,8 +967,8 @@ PaAno 正式适配遵循其官方 multivariate 启动脚本的 `patch_size=96`�
 `num_iters=100`、`batch_size=512`、`lr=1e-4` 和 RevIN 设置；仅随机种子按本项目
 预注册协议统一为 `42`，不采用上游示例的 `2027`。
 
-当前中央 manifest 共 1225 项：P0 为 898 项，P1 为 327 项；其中实际重计算口径为
-P0 的 654 次 full model fit 与 180 次 Stage-B/Test，新增的 E10 冻结协议和 P0
+当前中央 manifest 共 1220 项：P0 为 893 项，P1 为 327 项；其中实际重计算口径为
+P0 的 649 次 full model fit 与 180 次 Stage-B/Test，新增的 E10 冻结协议和 P0
 表格收口均为 analysis，不增加训练。TEP full 按序列级产物验收，正式要求
 `test_sequence_scores_selected.npy`、序列表、指标、资源、checkpoint、memory、
 fusion 和 full memory audit；`max_test_sequences` 仅供远程 smoke 显式限为 2，

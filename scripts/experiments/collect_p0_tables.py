@@ -18,7 +18,7 @@ from scripts.experiments.score_outputs import flatten_score_metrics
 
 
 MAIN_DATASETS = ("MSL", "PSM", "SMAP", "SMD", "SWAT")
-BASELINES = ("PaAno", "MEMTO", "PUAD", "PGRF-Net")
+BASELINES = ("PaAno", "PUAD", "PGRF-Net")
 E9_RATIOS = (0.0, 0.005, 0.01, 0.02, 0.05, 0.10)
 CATCH_DATASET_COUNT = 30
 TSB_EXPECTED = {("M", "tuning"): 20, ("M", "eval"): 180, ("U", "tuning"): 48, ("U", "eval"): 350}

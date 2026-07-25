@@ -207,10 +207,12 @@ E3 不再启动独立实验，直接复用 E1/E2 结果：
 正式五数据集定量比较固定优先级：
 
 1. PaAno：必须完成，作为近期 patch/reference 方法；
-2. MEMTO、PUAD、PGRF-Net：使用公开 Python 官方实现完成 memory/prototype 对比；
+2. PUAD、PGRF-Net：使用公开 Python 官方实现完成 memory/prototype 对比；
 3. CATCH：直接引用官方 benchmark 结果，不在 rebuttal 阶段重跑；
 4. DAMP、GDFlex：完成逐项协议审计。当前没有 MATLAB 环境，不把“缺少 MATLAB”
    伪装成协议不兼容；GDFlex 另需明确其官方 ML/UCR 单变量协议边界。
+5. MEMTO：不运行；只保留已完成的协议审计、adapter 和失败诊断记录，不纳入正式
+   结果、效率比较或任务计数。
 
 ### 具体步骤
 
@@ -231,7 +233,7 @@ E3 不再启动独立实验，直接复用 E1/E2 结果：
 
 #### 实验 E7：新增最相关外部基线
 
-1. 五个主数据集固定运行 PaAno、MEMTO、PUAD 和 PGRF-Net；CATCH 不重跑，使用
+1. 五个主数据集固定运行 PaAno、PUAD 和 PGRF-Net；MEMTO 不运行；CATCH 不重跑，使用
    官方发布结果并明确标记为 `reported from CATCH`；
 2. 保持与 SCAR 相同的数据划分与预处理；
 3. 若方法仅支持单变量：
@@ -1016,7 +1018,6 @@ rebuttal 必需项。**
 4. 固定重跑比较：
    - SCAR；
    - PaAno；
-   - MEMTO；
    - PUAD；
    - PGRF-Net。
    CATCH 仅作为官方 `reported` 性能参照，不纳入本次资源实测；
@@ -1276,7 +1277,7 @@ Reviewer dk9H 与另外两位审稿人一致，认为当前虽然基线数量多
 ### 实验组 B：五数据集最近相关基线与资源比较
 
 - E6 全部相关方法兼容性审计；
-- E7 PaAno、MEMTO、PUAD、PGRF-Net 五数据集正式运行；CATCH 不重跑；
+- E7 PaAno、PUAD、PGRF-Net 五数据集正式运行；MEMTO 不运行，CATCH 不重跑；
 - E37 同次训练采集性能、时间、GPU/CPU 内存、吞吐和产物大小；
 - E8 SCAR 内部 retrieval 对照；
 - DAMP/GDFlex 只做诚实协议与运行环境说明，不生成未经验证的替代数字。
@@ -1661,7 +1662,7 @@ Reviewer dk9H 与另外两位审稿人一致，认为当前虽然基线数量多
 ## 阶段 0：远程服务器与协议冻结
 
 1. 记录服务器 GPU/CPU/RAM、驱动、CUDA、PyTorch、Python 和 Git commit；
-2. 建立 SCAR 与 PaAno/MEMTO/PUAD/PGRF-Net 的独立可复现环境；保留 CATCH
+2. 建立 SCAR 与 PaAno/PUAD/PGRF-Net 的独立可复现环境；保留 MEMTO/CATCH
    环境说明，但不把它加入正式队列；
 3. 安装并验证统一资源监控；
 4. 对每条流水线先执行一个小样本 dry-run 和一个模型级 smoke test；
@@ -1673,7 +1674,7 @@ Reviewer dk9H 与另外两位审稿人一致，认为当前虽然基线数量多
 1. 在 MSL、PSM、SMAP、SMD、SWaT 各训练一次 SCAR seed-42 Stage-A；
 2. 构建默认 Stage-B、测试并全程采集 E37 资源数据；
 3. 保存 checkpoint、config、逐点 scores、memory provenance、resource JSON 和环境清单；
-4. 对 PaAno、MEMTO、PUAD、PGRF-Net 做五数据集正式训练；CATCH 只读取官方结果；
+4. 对 PaAno、PUAD、PGRF-Net 做五数据集正式训练；MEMTO 不运行，CATCH 只读取官方结果；
 5. 同次生成性能表 T3 和效率表 T8，不为效率单独重跑。
 
 ## 阶段 2：复用五数据集 checkpoint 完成机制与鲁棒性
@@ -1726,7 +1727,7 @@ Reviewer dk9H 与另外两位审稿人一致，认为当前虽然基线数量多
 4. 五个主数据集上的净化比例敏感性；
 5. 五个主数据集上的训练污染率鲁棒性；
 6. TEP 六模式全故障；
-7. 五数据集 × SCAR/PaAno/MEMTO/PUAD/PGRF-Net 的性能和资源比较，并列出 CATCH
+7. 五数据集 × SCAR/PaAno/PUAD/PGRF-Net 的性能和资源比较，并列出 CATCH
    官方 reported 性能作为参照；
 8. 五数据集 memory keep ratio 的性能—效率—bank size 折中；
 9. CATCH 当前五数据集之外的全部兼容真实数据集；
@@ -1793,7 +1794,7 @@ Reviewer dk9H 与另外两位审稿人一致，认为当前虽然基线数量多
 - [ ] CATCH 当前五数据集之外的全部兼容真实数据和六类合成异常均有结果或明确失败记录；
 - [ ] TSB-AD-M Eva 180 和 U Eva 350 均完成；
 - [ ] E9 和 E10 均覆盖 MSL、PSM、SMAP、SMD、SWaT；
-- [ ] SCAR 与 PaAno/MEMTO/PUAD/PGRF-Net 在五个主数据集上完成性能和资源比较；
+- [ ] SCAR 与 PaAno/PUAD/PGRF-Net 在五个主数据集上完成性能和资源比较；
   CATCH 只使用官方 reported 结果，且正式 manifest 中不存在 CATCH 训练任务；
 - [ ] 所有新增结果均来自统一协议；
 - [ ] 所有正式随机实验均使用固定模型 seed `42`，未把调试 seed、bootstrap 或计时重复误写成模型 seed 重复；

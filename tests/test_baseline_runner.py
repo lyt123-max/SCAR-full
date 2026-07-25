@@ -13,7 +13,7 @@ from scripts.rebuttal.baselines.run_paano_adapter import parse_args as parse_paa
 
 class BaselineRunnerTests(unittest.TestCase):
     def test_formal_methods_exclude_reported_catch(self) -> None:
-        self.assertEqual(FORMAL_METHODS, ("PaAno", "MEMTO", "PUAD", "PGRF-Net"))
+        self.assertEqual(FORMAL_METHODS, ("PaAno", "PUAD", "PGRF-Net"))
 
     def test_all_supported_methods_have_project_side_adapters(self) -> None:
         for method in ("PaAno", "MEMTO", "PUAD", "PGRF-Net", "CATCH"):

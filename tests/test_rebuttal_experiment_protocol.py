@@ -57,17 +57,17 @@ class FormalProtocolTests(unittest.TestCase):
         tasks = build_p0_tasks(Path("/artifacts"), python_exe="python")
         full = [task for task in tasks if task.compute_kind == "full_model_fit"]
         stage_b = [task for task in tasks if task.compute_kind == "stage_b_test"]
-        self.assertEqual(len(full), 654)
+        self.assertEqual(len(full), 649)
         self.assertEqual(len(stage_b), 180)
         self.assertEqual(len({task.run_id for task in tasks}), len(tasks))
 
     def test_formal_baseline_queue_does_not_rerun_catch(self) -> None:
         tasks = build_p0_tasks(Path("/artifacts"), python_exe="python")
         baselines = [task for task in tasks if task.group == "baselines"]
-        self.assertEqual(len(baselines), 20)
+        self.assertEqual(len(baselines), 15)
         self.assertEqual(
             {task.method for task in baselines},
-            {"PaAno", "MEMTO", "PUAD", "PGRF-Net"},
+            {"PaAno", "PUAD", "PGRF-Net"},
         )
 
     def test_formal_scar_tasks_parallelize_score_metrics(self) -> None:
@@ -400,7 +400,7 @@ class ManifestContractTests(unittest.TestCase):
     def test_plan_summary_separates_recomputation_kinds(self) -> None:
         tasks = build_p0_tasks(Path("/artifacts"), python_exe="python")
         summary = summarize_tasks(tasks)
-        self.assertEqual(summary["full_model_fit"], 654)
+        self.assertEqual(summary["full_model_fit"], 649)
         self.assertEqual(summary["stage_b_test"], 180)
         self.assertGreater(summary["total"], 0)
 
@@ -506,7 +506,7 @@ class ManifestContractTests(unittest.TestCase):
             output = Path(temp)
             tasks = build_p0_tasks(Path("/artifacts"), python_exe="python")
             payload = write_plan(tasks, output)
-            self.assertEqual(payload["summary"]["full_model_fit"], 654)
+            self.assertEqual(payload["summary"]["full_model_fit"], 649)
             lines = (output / "plan.jsonl").read_text(encoding="utf-8").splitlines()
             self.assertEqual(len(lines), len(tasks))
             self.assertEqual(json.loads(lines[0])["run_id"], tasks[0].run_id)
@@ -529,9 +529,9 @@ class ManifestContractTests(unittest.TestCase):
             python_exe="python",
         )
         self.assertEqual({task.group for task in tasks}, AC_CORE_GROUPS)
-        self.assertEqual(len(tasks), 107)
+        self.assertEqual(len(tasks), 102)
         self.assertEqual(
-            sum(task.compute_kind == "full_model_fit" for task in tasks), 56
+            sum(task.compute_kind == "full_model_fit" for task in tasks), 51
         )
         self.assertEqual(
             sum(task.compute_kind == "stage_b_test" for task in tasks), 25

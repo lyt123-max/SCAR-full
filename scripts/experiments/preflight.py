@@ -16,7 +16,6 @@ from scripts.experiments.protocol import build_p0_tasks, build_p1_tasks
 
 PINNED = {
     "PaAno": "d4c67116190efa4592dc6a8a157ced0def68b6af",
-    "MEMTO": "5a3287103021c5c7e7cac9377c626cf18bdea50c",
     "PUAD": "41e8b4377e6baa83e56b8f3acdb60ff04ed6c892",
     "PGRF-Net": "5dc6f7522d20043eb31f6b2b13091c80ad394dcb",
     "CATCH": "3647c69be5eb56649b072596cf89098e689e20c3",
@@ -45,7 +44,7 @@ def static_checks(artifact_root: Path) -> list[dict]:
     add("p0_unique_run_ids", len({task.run_id for task in p0}) == len(p0), len(p0))
     add(
         "p0_compute_counts",
-        sum(task.compute_kind == "full_model_fit" for task in p0) == 654
+        sum(task.compute_kind == "full_model_fit" for task in p0) == 649
         and sum(task.compute_kind == "stage_b_test" for task in p0) == 180,
         {
             "full": sum(task.compute_kind == "full_model_fit" for task in p0),
@@ -76,8 +75,9 @@ def static_checks(artifact_root: Path) -> list[dict]:
     )
     baseline = [task for task in p0 if task.group == "baselines"]
     add(
-        "baseline_matrix_4x5_without_catch_reruns",
-        len(baseline) == 20 and all(task.method != "CATCH" for task in baseline),
+        "baseline_matrix_3x5_without_memto_or_catch_reruns",
+        len(baseline) == 15
+        and {task.method for task in baseline} == {"PaAno", "PUAD", "PGRF-Net"},
         {"count": len(baseline), "methods": sorted({task.method for task in baseline})},
     )
     e10_protocol = [task for task in p0 if task.group == "e10_protocol"]
@@ -122,8 +122,6 @@ def static_checks(artifact_root: Path) -> list[dict]:
         "scar-paano-cu126.yml",
         "catch-cu126.yml",
         "pgrf-cu126.yml",
-        "memto-official.yml",
-        "memto-cu126-compat.yml",
         "puad-official.yml",
         "puad-cu126-compat.yml",
     )
