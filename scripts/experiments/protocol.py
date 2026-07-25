@@ -24,6 +24,20 @@ LITE_E29_LENGTHS = (128, 512)
 LITE_E30_PATCHES = (8, 64)
 LITE_E31_KEEP_RATIOS = (1.0, 0.25, 0.10)
 LITE_E31_TOP_K = (10, 20, 40)
+LITE_EXECUTION_OVERRIDES: dict[str, Any] = {
+    "memory_build_stride": 4,
+    "test_stride": 4,
+    "top_M": 20,
+    "coreset_max_patches_per_scale": 50_000,
+    "coreset_fps_threshold": 50_000,
+}
+LITE_SCAR_ENVIRONMENT = {
+    "SCAR_METRIC_WORKERS": "4",
+    "OMP_NUM_THREADS": "16",
+    "MKL_NUM_THREADS": "16",
+    "OPENBLAS_NUM_THREADS": "16",
+    "NUMEXPR_NUM_THREADS": "16",
+}
 
 
 _COMMON_PROFILE: dict[str, Any] = {
@@ -92,6 +106,13 @@ FORMAL_DATASET_PROFILES: dict[str, dict[str, Any]] = {
         completion_dropout=0.2,
     ),
 }
+
+
+def _lite_profile(dataset: str, **overrides: Any) -> dict[str, Any]:
+    result = dict(FORMAL_DATASET_PROFILES[dataset])
+    result.update(LITE_EXECUTION_OVERRIDES)
+    result.update(overrides)
+    return result
 
 
 CATCH_EXTENSION_DATASETS = (
@@ -366,6 +387,16 @@ def _with_metric_workers(task: RunSpec) -> RunSpec:
     metadata = dict(task.metadata)
     environment = dict(metadata.get("environment", {}))
     environment["SCAR_METRIC_WORKERS"] = "8"
+    metadata["environment"] = environment
+    return replace(task, metadata=metadata)
+
+
+def _with_lite_environment(task: RunSpec) -> RunSpec:
+    if task.method != "SCAR":
+        return task
+    metadata = dict(task.metadata)
+    environment = dict(metadata.get("environment", {}))
+    environment.update(LITE_SCAR_ENVIRONMENT)
     metadata["environment"] = environment
     return replace(task, metadata=metadata)
 
@@ -1320,7 +1351,7 @@ def build_lite_tasks(
 
     for dataset in MAIN_DATASETS:
         experiment_name = f"scar_main_{dataset.lower()}_seed42"
-        anchor_config = dict(FORMAL_DATASET_PROFILES[dataset])
+        anchor_config = _lite_profile(dataset)
         anchor_stage = "full"
         anchor_compute_kind = "full_model_fit"
         if anchor_root is not None:
@@ -1390,11 +1421,11 @@ def build_lite_tasks(
                 group="lite_e11_source",
                 compute_kind="stage_b_test",
                 experiment_name=name,
-                config={
-                    **FORMAL_DATASET_PROFILES[dataset],
-                    "clean_ratio": clean_ratio,
-                    "base_experiment_dir": str(anchor.artifact_dir),
-                },
+                config=_lite_profile(
+                    dataset,
+                    clean_ratio=clean_ratio,
+                    base_experiment_dir=str(anchor.artifact_dir),
+                ),
                 stage="stage_b_test",
                 dependencies=(anchor.run_id,),
             )
@@ -1469,6 +1500,9 @@ def build_lite_tasks(
                             "n_folds": LITE_E10_FOLDS,
                             "seed": FORMAL_SEED,
                             "protocol": "three-day-lite",
+                            "lite_execution_budget": dict(
+                                LITE_EXECUTION_OVERRIDES
+                            ),
                         },
                         command=(
                             python_exe,
@@ -1574,7 +1608,7 @@ def build_lite_tasks(
             group="lite_e29",
             compute_kind="full_model_fit",
             experiment_name=fit_name,
-            config={**FORMAL_DATASET_PROFILES[dataset], "seq_len": 512},
+            config=_lite_profile(dataset, seq_len=512),
         )
         e29_fits[dataset] = e29_fit
         tasks.append(e29_fit)
@@ -1605,10 +1639,10 @@ def build_lite_tasks(
                 group="lite_e30",
                 compute_kind="full_model_fit",
                 experiment_name=fit_name,
-                config={
-                    **FORMAL_DATASET_PROFILES[dataset],
-                    "patch_sizes": [patch_size],
-                },
+                config=_lite_profile(
+                    dataset,
+                    patch_sizes=[patch_size],
+                ),
             )
             tasks.append(fit)
             tasks.append(
@@ -1643,12 +1677,12 @@ def build_lite_tasks(
                 group="lite_e31",
                 compute_kind="stage_b_test",
                 experiment_name=name,
-                config={
-                    **FORMAL_DATASET_PROFILES[dataset],
-                    "seq_len": 512,
-                    "coreset_keep_ratio": keep_ratio,
-                    "base_experiment_dir": str(e29_fit.artifact_dir),
-                },
+                config=_lite_profile(
+                    dataset,
+                    seq_len=512,
+                    coreset_keep_ratio=keep_ratio,
+                    base_experiment_dir=str(e29_fit.artifact_dir),
+                ),
                 stage="stage_b_test",
                 dependencies=(e29_fit.run_id,),
             )
@@ -1904,4 +1938,4 @@ def build_lite_tasks(
     )
     if len({task.run_id for task in tasks}) != len(tasks):
         raise ValueError("Lightweight rebuttal protocol contains duplicate run IDs.")
-    return [_with_metric_workers(task) for task in tasks]
+    return [_with_lite_environment(task) for task in tasks]

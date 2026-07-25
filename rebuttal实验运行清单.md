@@ -308,6 +308,12 @@ python scripts/tsb_ad/run_benchmark.py \
 1 次预热 + 3 次推理时间、峰值资源、模型/参考库字节，并对 reference/query
 规模生成扩展性表。轻量实验不得生成或引用图片。
 
+lite scope 的统一计算预算为 `memory_build_stride=4`、`test_stride=4`、
+`coreset_max_patches_per_scale=50000`、`top_M=20`。该设置遍历完整时间轴并保持
+逐点重叠聚合，不裁剪测试段；E31 的 bank 比例以 50k 基准定义。每个 SCAR 任务固定
+16 个数值库线程和 4 个指标 worker，四卡初始每卡一个任务。该预算不得反向覆盖
+AC-core、完整 P0/P1 或主表的 200k memory/原 stride 配置。
+
 ## 11. 运行量核算
 
 | 类型 | 数量 | 说明 |

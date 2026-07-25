@@ -204,6 +204,30 @@ class FormalProtocolTests(unittest.TestCase):
             },
             set(FORMAL_DATASET_PROFILES),
         )
+        scar_compute = [
+            task
+            for task in tasks
+            if task.method == "SCAR"
+            and task.compute_kind in {"full_model_fit", "stage_b_test"}
+            and "contamination_ratio" not in task.config
+        ]
+        self.assertTrue(scar_compute)
+        for task in scar_compute:
+            self.assertEqual(task.config["memory_build_stride"], 4)
+            self.assertEqual(task.config["test_stride"], 4)
+            self.assertEqual(task.config["top_M"], 20)
+            self.assertEqual(
+                task.config["coreset_max_patches_per_scale"],
+                50_000,
+            )
+            environment = task.metadata["environment"]
+            self.assertEqual(environment["OMP_NUM_THREADS"], "16")
+            self.assertEqual(environment["SCAR_METRIC_WORKERS"], "4")
+        self.assertEqual(
+            FORMAL_DATASET_PROFILES["MSL"]["coreset_max_patches_per_scale"],
+            200_000,
+        )
+        self.assertEqual(FORMAL_DATASET_PROFILES["MSL"]["test_stride"], 1)
 
     def test_lite_e10_keeps_endpoints_and_three_way_ten_percent_contrast(self) -> None:
         tasks = build_lite_tasks(Path("/artifacts"), python_exe="python")
@@ -214,6 +238,21 @@ class FormalProtocolTests(unittest.TestCase):
         for dataset in FORMAL_DATASET_PROFILES:
             rows = [task for task in e10 if task.dataset == dataset]
             self.assertEqual(len(rows), 10)
+            self.assertTrue(
+                all(
+                    task.config["lite_execution_budget"][
+                        "coreset_max_patches_per_scale"
+                    ]
+                    == 50_000
+                    for task in rows
+                )
+            )
+            self.assertTrue(
+                all(
+                    task.metadata["environment"]["OMP_NUM_THREADS"] == "16"
+                    for task in rows
+                )
+            )
             for fold in (0, 1):
                 fold_rows = [task for task in rows if task.config["fold"] == fold]
                 observed = {

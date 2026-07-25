@@ -1828,6 +1828,10 @@ plan|run|resume|status|validate|collect`。正式任务由中央配置注册表�
 三天轻量队列可用 `--lite-anchor-root` 指向经过审计的五主集 Stage-A 目录；该入口
 只复用 `stage_a.pt`，随后在当前 artifact 根目录重新执行 memory、fusion、full audit
 和测试，并产生当前源码哈希对应的新 run record，禁止直接把旧记录改写成当前结果。
+为满足四卡、64 核服务器的三天时限，lite scope 固定使用 stride 4 遍历完整训练/测试
+时间轴、每尺度 50k memory cap、`top_M=20`，并限制每个 SCAR 任务为 16 个数值库线程
+和 4 个指标 worker；它不截断测试序列，仍输出完整逐点分数。E31 的 bank 比例相对
+50k 基准定义。该预算仅适用于补充控制实验，完整 P0/P1、AC-core 和主表配置不变。
 五主集 anchor 从首次运行起启用 full memory audit 和资源监控；E9、E10、E38 只执行
 必要的 Stage-B/Test，E11、E12、E39 只分析已有 audit。
 

@@ -1020,6 +1020,14 @@ E9/E10 full audit。E29 只比较 `L=128/512`，E30 只比较单尺度 `p=8/64` 
 full 机制日志生成固定 `IDV10`、六工况各一行的真实工况案例表；所有输出仅为 CSV、
 Markdown 表和文字摘要。
 
+为保证上述 158 项可在四卡、64 核节点的三天时限内闭环，lite scope 预注册独立的
+计算预算：`memory_build_stride=4`、`test_stride=4`、每尺度最多保留 `50,000`
+个 memory patch、`top_M=20`。窗口仍覆盖完整训练和测试时间轴，逐点分数仍按重叠
+窗口聚合，不截断数据或只选测试子集；E31 的 `q` 轴相对于该 50k 基准 bank 定义。
+每个 SCAR 任务限制为 16 个 OMP/MKL/OpenBLAS/NumExpr 线程及 4 个指标 worker，
+以允许四卡任务并行而不让 CPU-FAISS 过度超卖。该预算只用于补充敏感性和控制实验，
+主表、AC-core、完整 P0/P1 的原 stride、`top_M=50` 和 200k memory cap 均不改变。
+
 ```bash
 python scripts/experiments/rebuttal.py plan --scope lite
 python scripts/experiments/rebuttal.py run --scope lite \
