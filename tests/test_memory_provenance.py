@@ -27,7 +27,9 @@ def make_config(tmp_path: Path, **overrides) -> CoReMADConfig:
         "state_novelty_k": 1,
     }
     values.update(overrides)
-    return CoReMADConfig(**values)
+    config = CoReMADConfig(**values)
+    config.experiment_dir.mkdir(parents=True, exist_ok=True)
+    return config
 
 
 def test_memory_seed_defaults_to_stage_a_seed(tmp_path: Path) -> None:

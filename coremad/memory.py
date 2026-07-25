@@ -1575,6 +1575,48 @@ class MemoryBank:
         return neighbor_z, topk_dists, neighbor_valid_out, window_ids, topk_idx
 
     @staticmethod
+    def _batched_prototype_support_score(
+        retrieval_query: torch.Tensor,
+        query_z: torch.Tensor,
+        candidate_z: torch.Tensor,
+        candidate_c: torch.Tensor,
+        candidate_window_ids: torch.Tensor,
+        candidate_valid: torch.Tensor,
+        candidate_weights: torch.Tensor,
+        *,
+        use_context_key_retrieval: bool,
+        top_k: int,
+        tau: float,
+        eps: float,
+    ) -> torch.Tensor:
+        candidate_key = candidate_c if use_context_key_retrieval else candidate_z
+        neighbor_z, topk_distances, neighbor_valid, _, topk_idx = (
+            MemoryBank._batched_context_topk_neighbors(
+                retrieval_query,
+                candidate_key,
+                candidate_z,
+                candidate_window_ids,
+                candidate_valid,
+                top_k,
+            )
+        )
+        neighbor_valid = neighbor_valid & torch.isfinite(topk_distances)
+        expanded_weights = candidate_weights[:, None, :].expand(
+            -1,
+            retrieval_query.shape[1],
+            -1,
+        )
+        neighbor_weights = torch.gather(expanded_weights, 2, topk_idx)
+        return MemoryBank._compute_support_score(
+            query_z,
+            neighbor_z,
+            neighbor_valid,
+            neighbor_weights,
+            tau=tau,
+            eps=eps,
+        )
+
+    @staticmethod
     def _expand_candidate_weights(
         expanded_window_ids: torch.Tensor,
         candidate_window_ids: torch.Tensor,
@@ -1781,30 +1823,18 @@ class MemoryBank:
                 proto_window_weights_list,
                 z_query.device,
             )
-            for batch_idx in range(batch):
-                valid_count = int(proto_candidate_valid[batch_idx].sum().item())
-                if valid_count <= 0:
-                    continue
-                proto_candidate_z_single = proto_candidate_z[batch_idx, :valid_count]
-                proto_candidate_c_single = proto_candidate_c[batch_idx, :valid_count]
-                proto_candidate_window_ids_single = proto_candidate_window_ids[batch_idx, :valid_count]
-                proto_candidate_key_single = (
-                    proto_candidate_c_single if self.config.use_context_key_retrieval else proto_candidate_z_single
-                )
-                proto_neighbor_z, _, proto_neighbor_valid, _, proto_topk_idx = self._context_topk_neighbors(
-                    retrieval_query[batch_idx],
-                    proto_candidate_key_single,
-                    proto_candidate_z_single,
-                    proto_candidate_window_ids_single,
-                    self.config.top_K,
-                )
-                proto_candidate_patch_weights = proto_candidate_weights[batch_idx, :valid_count]
-                proto_neighbor_weights = proto_candidate_patch_weights[proto_topk_idx]
-                soft_mem[batch_idx] = self._compute_support_score(
-                    z_query[batch_idx],
-                    proto_neighbor_z,
-                    proto_neighbor_valid,
-                    proto_neighbor_weights,
+            active_proto_rows = proto_candidate_valid.any(dim=1)
+            if active_proto_rows.any():
+                soft_mem[active_proto_rows] = self._batched_prototype_support_score(
+                    retrieval_query[active_proto_rows],
+                    z_query[active_proto_rows],
+                    proto_candidate_z[active_proto_rows],
+                    proto_candidate_c[active_proto_rows],
+                    proto_candidate_window_ids[active_proto_rows],
+                    proto_candidate_valid[active_proto_rows],
+                    proto_candidate_weights[active_proto_rows],
+                    use_context_key_retrieval=self.config.use_context_key_retrieval,
+                    top_k=self.config.top_K,
                     tau=self.config.support_score_tau,
                     eps=self.config.support_score_eps,
                 )
