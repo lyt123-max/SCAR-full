@@ -65,6 +65,7 @@ _COMMON_PROFILE: dict[str, Any] = {
     "memory_seed": FORMAL_SEED,
     "memory_audit_mode": "full",
     "resource_monitor": 1,
+    "export_visualizations": 0,
 }
 
 
@@ -255,6 +256,7 @@ def _scar_task(
             "memory_seed",
             "memory_audit_mode",
             "evaluation_score_key",
+            "export_visualizations",
         )
         overrides = [
             item

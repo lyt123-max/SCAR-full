@@ -11,11 +11,17 @@ from scripts.experiments.reuse_stage_a import copy_stage_a_artifacts, parse_over
 class ReuseStageATests(unittest.TestCase):
     def test_override_values_use_json_types(self) -> None:
         values = parse_overrides(
-            ["clean_ratio=0.005", "top_M=50", "resource_monitor_enabled=true"]
+            [
+                "clean_ratio=0.005",
+                "top_M=50",
+                "resource_monitor_enabled=true",
+                "export_visualizations=false",
+            ]
         )
         self.assertEqual(values["clean_ratio"], 0.005)
         self.assertEqual(values["top_M"], 50)
         self.assertIs(values["resource_monitor_enabled"], True)
+        self.assertIs(values["export_visualizations"], False)
 
     def test_copy_refuses_to_replace_different_stage_a(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

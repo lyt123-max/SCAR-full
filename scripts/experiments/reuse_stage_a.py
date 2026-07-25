@@ -33,6 +33,7 @@ ALLOWED_STAGE_B_OVERRIDES = {
     "resource_monitor_enabled",
     "resource_sample_interval",
     "evaluation_score_key",
+    "export_visualizations",
     "use_two_level_retrieval",
     "use_context_key_retrieval",
 }

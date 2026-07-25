@@ -49,6 +49,7 @@ class FormalProtocolTests(unittest.TestCase):
             self.assertEqual(profile["seed"], 42)
             self.assertEqual(profile["memory_audit_mode"], "full")
             self.assertEqual(profile["resource_monitor"], 1)
+            self.assertEqual(profile["export_visualizations"], 0)
 
     def test_rebuttal_sweep_grids_are_frozen(self) -> None:
         self.assertEqual(PURIFICATION_RATIOS, (0.0, 0.005, 0.01, 0.02, 0.05, 0.10))
