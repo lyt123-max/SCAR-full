@@ -44,6 +44,30 @@ class ReuseStageATests(unittest.TestCase):
             after = hashlib.sha256((target / "stage_a.pt").read_bytes()).hexdigest()
             self.assertEqual(before, after)
 
+    def test_copy_accepts_completed_artifacts_without_last_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "source"
+            target = root / "target"
+            source.mkdir()
+            (source / "stage_a.pt").write_bytes(b"best")
+
+            copy_stage_a_artifacts(source, target)
+
+            self.assertEqual((target / "stage_a.pt").read_bytes(), b"best")
+            self.assertFalse((target / "stage_a_last.pt").exists())
+
+    def test_copy_still_requires_best_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "source"
+            target = root / "target"
+            source.mkdir()
+            (source / "stage_a_last.pt").write_bytes(b"last")
+
+            with self.assertRaisesRegex(FileNotFoundError, "stage_a.pt"):
+                copy_stage_a_artifacts(source, target)
+
 
 if __name__ == "__main__":
     unittest.main()

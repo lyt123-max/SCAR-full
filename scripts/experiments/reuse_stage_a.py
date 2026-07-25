@@ -48,10 +48,14 @@ def _sha256(path: Path) -> str:
 
 def copy_stage_a_artifacts(source_dir: Path, target_dir: Path) -> None:
     target_dir.mkdir(parents=True, exist_ok=True)
+    required_source = source_dir / "stage_a.pt"
+    if not required_source.is_file():
+        raise FileNotFoundError(f"Missing Stage-A artifact: {required_source}")
+
     for filename in ("stage_a.pt", "stage_a_last.pt"):
         source = source_dir / filename
         if not source.is_file():
-            raise FileNotFoundError(f"Missing Stage-A artifact: {source}")
+            continue
         target = target_dir / filename
         if target.exists():
             if not target.is_file() or _sha256(target) != _sha256(source):
