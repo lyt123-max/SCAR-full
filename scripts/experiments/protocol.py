@@ -1588,6 +1588,8 @@ def build_lite_tasks(
                             str(source),
                             "--fold",
                             str(fold),
+                            "--n-folds",
+                            str(LITE_E10_FOLDS),
                             "--fold-manifest",
                             str(protocol_dir / "contamination_fold_manifest.json"),
                             "--seed",

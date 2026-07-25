@@ -70,6 +70,17 @@ class SingleSeedProtocolTests(unittest.TestCase):
         self.assertNotIn("args.seed + fold_index", source)
         self.assertIn("seed=args.seed", source)
 
+    def test_lite_zero_contamination_passes_registered_fold_count(self) -> None:
+        source = (
+            PROJECT_ROOT / "scripts" / "experiments" / "protocol.py"
+        ).read_text(encoding="utf-8")
+        zero_section = source[
+            source.index('group="lite_e10_zero"') :
+            source.index('fit_name = f"scar_lite_e29_', source.index('group="lite_e10_zero"'))
+        ]
+        self.assertIn('"--n-folds"', zero_section)
+        self.assertIn("str(LITE_E10_FOLDS)", zero_section)
+
 
 if __name__ == "__main__":
     unittest.main()
