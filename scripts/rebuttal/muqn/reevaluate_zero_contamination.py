@@ -15,7 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.experiments.score_outputs import score_metric_groups
+from scripts.experiments.score_outputs import resolve_score_files, score_metric_groups
 from scripts.rebuttal.muqn.contamination import (
     Event,
     event_evaluation_mask,
@@ -103,7 +103,6 @@ def main() -> int:
     test_metrics = json.loads(
         (experiment_dir / "test_metrics.json").read_text(encoding="utf-8")
     )
-    score_files = test_metrics["score_files"]
     if args.score_file is not None:
         requested_files = {"selected": args.score_file}
     else:
@@ -115,6 +114,7 @@ def main() -> int:
             "cdf_max",
             *sorted(test_metrics.get("subscores", {})),
         ]
+        score_files = resolve_score_files(experiment_dir, test_metrics, score_names)
         requested_files = {
             name: score_files[name] for name in dict.fromkeys(score_names)
         }

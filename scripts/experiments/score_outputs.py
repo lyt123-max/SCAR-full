@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
+
+import numpy as np
 
 
 CORE_FUSION_SCORE_KEYS = ("raw_max", "zscore_mean", "cdf_mean", "cdf_max")
@@ -129,6 +132,43 @@ def require_finite_report_metrics(
     ]
     if invalid:
         raise ValueError(f"{context} has missing or non-finite report metrics: {invalid}")
+
+
+def resolve_score_files(
+    experiment_dir: Path,
+    test_metrics: Mapping[str, Any],
+    score_names: list[str],
+) -> dict[str, str]:
+    """Resolve score arrays, materializing diagnostic-only subscores when needed."""
+    configured = test_metrics.get("score_files")
+    if not isinstance(configured, Mapping):
+        raise KeyError("test metrics do not contain a score_files mapping")
+
+    resolved = {
+        str(name): str(filename)
+        for name, filename in configured.items()
+        if isinstance(filename, str)
+    }
+    missing = [name for name in dict.fromkeys(score_names) if name not in resolved]
+    if not missing:
+        return resolved
+
+    diagnostic_path = experiment_dir / "test_diagnostic_scores.npz"
+    if not diagnostic_path.is_file():
+        raise KeyError(
+            f"score files are missing {missing} and no diagnostic archive exists"
+        )
+    with np.load(diagnostic_path, allow_pickle=False) as diagnostics:
+        unavailable = [name for name in missing if name not in diagnostics.files]
+        if unavailable:
+            raise KeyError(
+                f"score files and diagnostic archive are missing {unavailable}"
+            )
+        for name in missing:
+            filename = f"test_scores_{name}.npy"
+            np.save(experiment_dir / filename, np.asarray(diagnostics[name]))
+            resolved[name] = filename
+    return resolved
 
 
 def flatten_score_metrics(

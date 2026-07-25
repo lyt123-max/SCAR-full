@@ -17,7 +17,7 @@ if str(REPO_ROOT) not in sys.path:
 from coremad import CoReMADConfig, CoReMADTrainer
 from coremad.data import build_loader
 from coremad.evaluation import binary_point_metrics
-from scripts.experiments.score_outputs import score_metric_groups
+from scripts.experiments.score_outputs import resolve_score_files, score_metric_groups
 from scripts.rebuttal.muqn.contamination import (
     event_evaluation_mask,
     event_window_starts,
@@ -342,7 +342,6 @@ def main() -> None:
             test_metrics = json.loads(
                 (target_dir / "test_metrics.json").read_text(encoding="utf-8")
             )
-            score_files = test_metrics["score_files"]
             score_names = [
                 "selected",
                 "raw_max",
@@ -351,6 +350,7 @@ def main() -> None:
                 "cdf_max",
                 *sorted(test_metrics.get("subscores", {})),
             ]
+            score_files = resolve_score_files(target_dir, test_metrics, score_names)
             heldout_score_metrics = {}
             for score_name in dict.fromkeys(score_names):
                 score_path = target_dir / score_files[score_name]
