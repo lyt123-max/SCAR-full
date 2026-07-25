@@ -13,10 +13,21 @@ from scripts.rebuttal.baselines.run_paano_adapter import parse_args as parse_paa
 
 class BaselineRunnerTests(unittest.TestCase):
     def test_formal_methods_exclude_reported_catch(self) -> None:
-        self.assertEqual(FORMAL_METHODS, ("PaAno", "PUAD", "PGRF-Net"))
+        self.assertEqual(
+            FORMAL_METHODS,
+            ("PaAno", "PUAD", "PGRF-Net", "KNN", "LOF"),
+        )
 
     def test_all_supported_methods_have_project_side_adapters(self) -> None:
-        for method in ("PaAno", "MEMTO", "PUAD", "PGRF-Net", "CATCH"):
+        for method in (
+            "PaAno",
+            "MEMTO",
+            "PUAD",
+            "PGRF-Net",
+            "CATCH",
+            "KNN",
+            "LOF",
+        ):
             command = build_adapter_command(
                 method=method,
                 baseline_python="/env/python",
@@ -29,6 +40,9 @@ class BaselineRunnerTests(unittest.TestCase):
             self.assertEqual(command[0], "/env/python")
             self.assertTrue(command[1].endswith("_adapter.py"))
             self.assertIn("--device", command)
+            if method in {"KNN", "LOF"}:
+                self.assertIn("--method", command)
+                self.assertIn(method, command)
 
     def test_rejects_nonformal_seed(self) -> None:
         with self.assertRaisesRegex(ValueError, "seed 42"):
@@ -48,6 +62,8 @@ class BaselineRunnerTests(unittest.TestCase):
             "MEMTO": ("--epochs", "1"),
             "PUAD": ("--epochs", "1"),
             "PGRF-Net": ("--epochs-stage1", "1"),
+            "KNN": ("--smoke", None),
+            "LOF": ("--smoke", None),
         }
         for method, pair in expected.items():
             command = build_adapter_command(
@@ -61,7 +77,8 @@ class BaselineRunnerTests(unittest.TestCase):
                 smoke=True,
             )
             index = command.index(pair[0])
-            self.assertEqual(command[index + 1], pair[1])
+            if pair[1] is not None:
+                self.assertEqual(command[index + 1], pair[1])
 
     def test_paano_adapter_matches_official_multivariate_hyperparameters(self) -> None:
         import sys

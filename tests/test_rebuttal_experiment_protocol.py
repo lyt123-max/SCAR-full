@@ -28,6 +28,7 @@ from scripts.experiments.protocol import (
     CORESET_KEEP_RATIOS,
     FORMAL_DATASET_PROFILES,
     PURIFICATION_RATIOS,
+    build_lite_tasks,
     build_p0_tasks,
     build_p1_tasks,
     validate_formal_request,
@@ -57,18 +58,19 @@ class FormalProtocolTests(unittest.TestCase):
         tasks = build_p0_tasks(Path("/artifacts"), python_exe="python")
         full = [task for task in tasks if task.compute_kind == "full_model_fit"]
         stage_b = [task for task in tasks if task.compute_kind == "stage_b_test"]
-        self.assertEqual(len(full), 649)
+        self.assertEqual(len(full), 659)
         self.assertEqual(len(stage_b), 180)
         self.assertEqual(len({task.run_id for task in tasks}), len(tasks))
 
     def test_formal_baseline_queue_does_not_rerun_catch(self) -> None:
         tasks = build_p0_tasks(Path("/artifacts"), python_exe="python")
         baselines = [task for task in tasks if task.group == "baselines"]
-        self.assertEqual(len(baselines), 15)
+        self.assertEqual(len(baselines), 25)
         self.assertEqual(
             {task.method for task in baselines},
-            {"PaAno", "PUAD", "PGRF-Net"},
+            {"PaAno", "PUAD", "PGRF-Net", "KNN", "LOF"},
         )
+        self.assertFalse(any(task.method == "CATCH" for task in baselines))
 
     def test_formal_scar_tasks_parallelize_score_metrics(self) -> None:
         tasks = build_p0_tasks(Path("/artifacts"), python_exe="python")
@@ -129,6 +131,9 @@ class FormalProtocolTests(unittest.TestCase):
             "table_p0_retrieval_strategies.csv", collector.required_artifacts
         )
         self.assertIn("table_p0_tep_scores.csv", collector.required_artifacts)
+        self.assertIn(
+            "table_p0_classical_scalability.csv", collector.required_artifacts
+        )
 
     def test_formal_protocol_rejects_nonformal_seed_and_u_eval_full(self) -> None:
         with self.assertRaisesRegex(ValueError, "seed 42"):
@@ -150,7 +155,8 @@ class FormalProtocolTests(unittest.TestCase):
             if task.group == "e30" and task.compute_kind == "full_model_fit"
         ]
         self.assertEqual(len(e29_fits), 15)
-        self.assertEqual(len(e30_fits), 68)
+        self.assertEqual(len(e30_fits), 20)
+        self.assertEqual({task.dataset for task in e30_fits}, set(FORMAL_DATASET_PROFILES))
         self.assertNotIn(128, {task.config["seq_len"] for task in e29_fits})
         self.assertTrue(all(len(task.config["patch_sizes"]) == 1 for task in e30_fits))
         for task in e30_fits:
@@ -176,6 +182,66 @@ class FormalProtocolTests(unittest.TestCase):
                 "state_novelty",
             ):
                 self.assertIn(f"scores_{score_name}.npy", task.required_artifacts)
+
+    def test_lite_protocol_is_five_dataset_self_contained_and_nonduplicated(self) -> None:
+        tasks = build_lite_tasks(Path("/artifacts"), python_exe="python")
+        counts = {
+            kind: sum(task.compute_kind == kind for task in tasks)
+            for kind in ("full_model_fit", "stage_b_test", "analysis")
+        }
+        self.assertEqual(len(tasks), 158)
+        self.assertEqual(
+            counts,
+            {"full_model_fit": 30, "stage_b_test": 70, "analysis": 58},
+        )
+        self.assertEqual(len({task.run_id for task in tasks}), len(tasks))
+        self.assertEqual(
+            {
+                task.dataset
+                for task in tasks
+                if task.group in {"lite_e29", "lite_e30", "lite_e31"}
+            },
+            set(FORMAL_DATASET_PROFILES),
+        )
+
+    def test_lite_e10_keeps_endpoints_and_three_way_ten_percent_contrast(self) -> None:
+        tasks = build_lite_tasks(Path("/artifacts"), python_exe="python")
+        e10 = [task for task in tasks if task.group == "lite_e10"]
+        zero = [task for task in tasks if task.group == "lite_e10_zero"]
+        self.assertEqual(len(e10), 50)
+        self.assertEqual(len(zero), 20)
+        for dataset in FORMAL_DATASET_PROFILES:
+            rows = [task for task in e10 if task.dataset == dataset]
+            self.assertEqual(len(rows), 10)
+            for fold in (0, 1):
+                fold_rows = [task for task in rows if task.config["fold"] == fold]
+                observed = {
+                    (
+                        float(task.config["contamination_ratio"]),
+                        float(task.config["clean_ratio"]),
+                    )
+                    for task in fold_rows
+                }
+                self.assertEqual(
+                    observed,
+                    {
+                        (0.01, 0.02),
+                        (0.05, 0.02),
+                        (0.10, 0.0),
+                        (0.10, 0.02),
+                        (0.10, 0.10),
+                    },
+                )
+
+    def test_lite_scope_is_selectable_without_p0_or_p1_tasks(self) -> None:
+        tasks = select_tasks(
+            scope="lite",
+            groups=None,
+            artifact_root=Path("/artifacts"),
+            python_exe="python",
+        )
+        self.assertEqual(len(tasks), 158)
+        self.assertTrue(all(task.group.startswith("lite_") for task in tasks))
 
 
 class ManifestContractTests(unittest.TestCase):
@@ -400,7 +466,7 @@ class ManifestContractTests(unittest.TestCase):
     def test_plan_summary_separates_recomputation_kinds(self) -> None:
         tasks = build_p0_tasks(Path("/artifacts"), python_exe="python")
         summary = summarize_tasks(tasks)
-        self.assertEqual(summary["full_model_fit"], 649)
+        self.assertEqual(summary["full_model_fit"], 659)
         self.assertEqual(summary["stage_b_test"], 180)
         self.assertGreater(summary["total"], 0)
 
@@ -506,7 +572,7 @@ class ManifestContractTests(unittest.TestCase):
             output = Path(temp)
             tasks = build_p0_tasks(Path("/artifacts"), python_exe="python")
             payload = write_plan(tasks, output)
-            self.assertEqual(payload["summary"]["full_model_fit"], 649)
+            self.assertEqual(payload["summary"]["full_model_fit"], 659)
             lines = (output / "plan.jsonl").read_text(encoding="utf-8").splitlines()
             self.assertEqual(len(lines), len(tasks))
             self.assertEqual(json.loads(lines[0])["run_id"], tasks[0].run_id)

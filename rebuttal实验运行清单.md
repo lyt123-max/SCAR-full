@@ -61,7 +61,7 @@
 | E9 其余非默认点 | 20 Stage-B/Test | 净化敏感性 | E11 稀有正常误删统计 |
 | E10 非零污染产物 | 135 Stage-B/Test | 污染鲁棒性 | E12 低误差异常存活统计 |
 | E38 非默认点 | 20 Stage-B/Test | memory keep ratio | E39 bank size/latency/RAM 表 |
-| 五数据集相关 baseline | 15 full | 性能比较 | 同一 checkpoint 做资源计时 |
+| 五数据集相关 baseline | 25 full | PaAno/PUAD/PGRF-Net/KNN/LOF 性能比较 | 同一次运行做性能、资源与内存；KNN/LOF 另做扩展性 |
 | CATCH 官方发布结果 | 0 | 扩展数据集 CATCH 对照 | 标为 `reported`，不冒充统一协议重跑 |
 
 ## 4. P0-1 五数据集 SCAR 锚点
@@ -285,12 +285,33 @@ python scripts/tsb_ad/run_benchmark.py \
 - [ ] 改变 `seq_len` 或 Stage-A 表征的点明确标记为新 full training；
 - [ ] 不挤占 CATCH、TSB-AD、E9/E10、基线和 TEP 的 P0 队列。
 
+### 10.1 三天轻量补充队列
+
+独立入口为 `--scope lite`，仅覆盖 MSL、PSM、SMAP、SMD、SWaT，共 158 项：
+
+| 证据 | 轻量口径 | 新重计算 |
+| --- | --- | ---: |
+| E10 | 污染 `1%/5%/10%`、2 折；`1/5%` 只做 default，`10%` 做 no/default/stronger | 50 Stage-B/Test |
+| E10 零污染 | 从 anchor 与 `clean_ratio=0` 分数按冻结 mask 重评估 | 20 analysis |
+| E11 | E9 的 `clean_ratio=0/0.02/0.10`，rare-normal 固定正常 state distance 90% 分位 | 10 Stage-B/Test，默认点复用 |
+| E12 | 直接分析 E10 注入 patch 的低误差存活 | 0 training |
+| E29 | `L=128/512`，比较 full 与 global | 5 full + 10 analysis |
+| E30 | 单尺度 `p=8/64`，比较 full/global，并复用默认多尺度 `8+32` | 10 full + 10 analysis |
+| E31 | L512 global，`q=1/.25/.10`、`top_K=10/20/40`，三预算轴 ±15% | 10 Stage-B/Test + 5 analysis |
+| KNN/LOF | 五主集逐点向量协议 | 10 full/fit |
+| 真实工况表 | 固定 TEP `IDV10`，M1-M6 各选预注册 `cdf_mean` 最高窗口 | 1 analysis |
+
+五个 anchor 若完整可复用，则不重新训练。轻量队列总计 30 full、70 Stage-B/Test、
+58 analysis；扣除复用的五个 anchor 后，新增为 25 full。KNN/LOF 同次输出性能、
+1 次预热 + 3 次推理时间、峰值资源、模型/参考库字节，并对 reference/query
+规模生成扩展性表。轻量实验不得生成或引用图片。
+
 ## 11. 运行量核算
 
 | 类型 | 数量 | 说明 |
 | --- | ---: | --- |
 | SCAR 五数据集锚点 | 5 full | 解锁机制、净化、污染、memory 和资源实验 |
-| 五数据集相关 baseline | 15 full | 3 方法 × 5 数据集；MEMTO 不运行，CATCH 只引用官方结果 |
+| 五数据集相关 baseline | 25 full | 5 方法 × 5 数据集；MEMTO 不运行，CATCH 只引用官方结果 |
 | CATCH 缺失 CSV 的 SCAR | 30 full | 不重复当前五数据集 |
 | TEP full | 1 full | 一套模型测试 168 条故障序列 |
 | TSB-AD SCAR | 598 full | tuning 68 + official eval 530；按一个预注册配置核算 |
@@ -301,7 +322,7 @@ python scripts/tsb_ad/run_benchmark.py \
 | E11/E12/E39 | 0 training | 全部从已有产物派生 |
 
 按 TSB-AD 每个 track 只验证一个预注册配置核算，完整 P0 为
-**649 次 full model fit + 180 次 Stage-B/Test**，即 829 次重计算任务。其中 598 次
+**659 次 full model fit + 180 次 Stage-B/Test**，即 839 次重计算任务。其中 598 次
 full 来自 SCAR 的官方 TSB-AD tuning/evaluation。PaAno 只在五个主数据集运行，不补
 TSB-AD；若 TSB-AD 比较多组配置，须按上一节公式增加 tuning 运行量。
 
@@ -372,7 +393,7 @@ bash scripts/experiments/remote_smoke.sh
 ```
 
 随后按 P0、P1 顺序使用 `rebuttal.py run|resume|status|validate|collect`。中央 manifest
-是任务数量和复用关系的唯一口径；P0 固定为 649 个 full model fit 与 180 个
+是任务数量和复用关系的唯一口径；P0 固定为 659 个 full model fit 与 180 个
 Stage-B/Test，P1 数量只读取 manifest，不手工累计。P0 完成后运行
 `--group p0_tables`，严格生成主五集、baseline、效率、CATCH、E9/E10 和 TSB 的
 CSV 与文字摘要，并单独生成 E1-E5 检索策略全分数表和 TEP 全分数表；缺项时该任务失败。

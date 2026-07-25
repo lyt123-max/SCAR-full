@@ -18,6 +18,12 @@ WINDOW_LENGTHS = (64, 128, 256, 512)
 SINGLE_PATCH_SIZES = (8, 16, 32, 64)
 BUDGET_DIMS = (64, 128, 256, 512)
 BUDGET_TOP_K = (5, 10, 20, 40, 80)
+LITE_E10_RATIOS = (0.01, 0.05, 0.10)
+LITE_E10_FOLDS = 2
+LITE_E29_LENGTHS = (128, 512)
+LITE_E30_PATCHES = (8, 64)
+LITE_E31_KEEP_RATIOS = (1.0, 0.25, 0.10)
+LITE_E31_TOP_K = (10, 20, 40)
 
 
 _COMMON_PROFILE: dict[str, Any] = {
@@ -424,7 +430,10 @@ def build_p0_tasks(artifact_root: Path, *, python_exe: str) -> list[RunSpec]:
             ),
             artifact_dir=artifact_root / tep_name,
             required_artifacts=SEQUENCE_FULL_AUDIT_REQUIRED
-            + ("tep_rebuttal_tables/table_t2_tep_availability.csv",),
+            + (
+                "tep_rebuttal_tables/table_t2_tep_availability.csv",
+                "tep_rebuttal_tables/table_t10_real_condition_cases.csv",
+            ),
             metadata={
                 "environment": {
                     "FORMAL_REBUTTAL": "1",
@@ -495,7 +504,7 @@ def build_p0_tasks(artifact_root: Path, *, python_exe: str) -> list[RunSpec]:
 
     # CATCH is compared using its official reported benchmark results.  Do not
     # spend rebuttal compute reproducing it under a second protocol.
-    for method in ("PaAno", "PUAD", "PGRF-Net"):
+    for method in ("PaAno", "PUAD", "PGRF-Net", "KNN", "LOF"):
         for dataset in MAIN_DATASETS:
             name = f"baseline_{method.lower().replace('-', '_')}_{dataset.lower()}_seed42"
             tasks.append(
@@ -532,6 +541,16 @@ def build_p0_tasks(artifact_root: Path, *, python_exe: str) -> list[RunSpec]:
                         "baseline_protocol.json",
                         "timing.json",
                         "resource_metrics.json",
+                    )
+                    + (
+                        (
+                            "memory_metrics.json",
+                            "scalability.json",
+                            "scalability.csv",
+                            "model.pkl",
+                        )
+                        if method in {"KNN", "LOF"}
+                        else ()
                     ),
                     dependencies=(anchors[dataset].run_id,),
                 )
@@ -962,6 +981,7 @@ def build_p0_tasks(artifact_root: Path, *, python_exe: str) -> list[RunSpec]:
                 "table_p0_tep_scores.csv",
                 "table_p0_baselines.csv",
                 "table_p0_efficiency.csv",
+                "table_p0_classical_scalability.csv",
                 "table_p0_catch.csv",
                 "table_p0_e9.csv",
                 "table_p0_e10.csv",
@@ -1085,7 +1105,10 @@ def build_p1_tasks(artifact_root: Path, *, python_exe: str) -> list[RunSpec]:
                     )
                 )
 
-    e30_datasets = (*MAIN_DATASETS, *SYNTHETIC_DATASETS)
+    # Rebuttal experiments E29-E31 use one common five-dataset scope. The
+    # synthetic extension remains available through the CATCH audit but is not
+    # part of the registered E30 comparison.
+    e30_datasets = MAIN_DATASETS
     for dataset in e30_datasets:
         base_profile = (
             FORMAL_DATASET_PROFILES[dataset]
@@ -1266,4 +1289,594 @@ def build_p1_tasks(artifact_root: Path, *, python_exe: str) -> list[RunSpec]:
         )
     )
 
+    return [_with_metric_workers(task) for task in tasks]
+
+
+def build_lite_tasks(artifact_root: Path, *, python_exe: str) -> list[RunSpec]:
+    """Build the five-dataset, three-day rebuttal protocol.
+
+    The lite registry is independent from the complete P0/P1 grids. It keeps
+    every reviewer-facing contrast while reducing only redundant interior
+    grid points. Existing compatible anchors can be copied into artifact_root
+    and are then skipped by resume after the normal execution audit.
+    """
+
+    artifact_root = Path(artifact_root)
+    tasks: list[RunSpec] = []
+    anchors: dict[str, RunSpec] = {}
+    e9_sources: list[RunSpec] = []
+    e10_runs: list[RunSpec] = []
+    e29_fits: dict[str, RunSpec] = {}
+    e31_q_tasks: dict[str, list[tuple[float, RunSpec]]] = {}
+
+    for dataset in MAIN_DATASETS:
+        anchor = _scar_task(
+            artifact_root=artifact_root,
+            python_exe=python_exe,
+            dataset=dataset,
+            group="lite_anchors",
+            compute_kind="full_model_fit",
+            experiment_name=f"scar_main_{dataset.lower()}_seed42",
+            config=dict(FORMAL_DATASET_PROFILES[dataset]),
+        )
+        anchors[dataset] = anchor
+        tasks.append(anchor)
+
+        timing_name = f"scar_efficiency_{dataset.lower()}_seed42"
+        tasks.append(
+            _analysis_task(
+                artifact_root=artifact_root,
+                method="SCAR",
+                dataset=dataset,
+                group="lite_efficiency_source",
+                name=timing_name,
+                config={
+                    "source_experiment": str(anchor.artifact_dir),
+                    "warmup_runs": 1,
+                    "timed_runs": 3,
+                },
+                command=(
+                    python_exe,
+                    str(
+                        REPO_ROOT
+                        / "scripts"
+                        / "efficiency"
+                        / "benchmark_scar_inference.py"
+                    ),
+                    "--experiment-dir",
+                    str(anchor.artifact_dir),
+                    "--output-dir",
+                    str(artifact_root / timing_name),
+                ),
+                required=("timing.json",),
+                dependencies=(anchor.run_id,),
+            )
+        )
+
+        for clean_ratio in (0.0, 0.10):
+            name = (
+                f"scar_lite_e9_{dataset.lower()}_clean_"
+                f"{str(clean_ratio).replace('.', 'p')}"
+            )
+            task = _scar_task(
+                artifact_root=artifact_root,
+                python_exe=python_exe,
+                dataset=dataset,
+                group="lite_e11_source",
+                compute_kind="stage_b_test",
+                experiment_name=name,
+                config={
+                    **FORMAL_DATASET_PROFILES[dataset],
+                    "clean_ratio": clean_ratio,
+                    "base_experiment_dir": str(anchor.artifact_dir),
+                },
+                stage="stage_b_test",
+                dependencies=(anchor.run_id,),
+            )
+            e9_sources.append(task)
+            tasks.append(task)
+
+        protocol_name = f"scar_lite_e10_{dataset.lower()}_frozen_protocol"
+        protocol_dir = artifact_root / protocol_name
+        protocol = _analysis_task(
+            artifact_root=artifact_root,
+            method="SCAR",
+            dataset=dataset,
+            group="lite_e10_protocol",
+            name=protocol_name,
+            config={
+                "dataset": dataset,
+                "base_experiment_dir": str(anchor.artifact_dir),
+                "contamination_ratios": list(LITE_E10_RATIOS),
+                "n_folds": LITE_E10_FOLDS,
+                "seed": FORMAL_SEED,
+            },
+            command=(
+                python_exe,
+                str(
+                    REPO_ROOT
+                    / "scripts"
+                    / "rebuttal"
+                    / "muqn"
+                    / "freeze_contamination_protocol.py"
+                ),
+                "--base-experiment-dir",
+                str(anchor.artifact_dir),
+                "--output-dir",
+                str(protocol_dir),
+                "--contamination-ratios",
+                *(str(value) for value in LITE_E10_RATIOS),
+                "--n-folds",
+                str(LITE_E10_FOLDS),
+                "--seed",
+                "42",
+            ),
+            required=("contamination_fold_manifest.json",),
+            dependencies=(anchor.run_id,),
+        )
+        tasks.append(protocol)
+
+        for fold in range(LITE_E10_FOLDS):
+            for contamination in LITE_E10_RATIOS:
+                clean_values = (
+                    (0.0, 0.02, 0.10)
+                    if contamination == 0.10
+                    else (0.02,)
+                )
+                for clean_ratio in clean_values:
+                    name = (
+                        f"scar_lite_e10_{dataset.lower()}_contam_"
+                        f"{str(contamination).replace('.', 'p')}_clean_"
+                        f"{str(clean_ratio).replace('.', 'p')}_fold_{fold}"
+                    )
+                    task = RunSpec(
+                        method="SCAR",
+                        dataset=dataset,
+                        seed=FORMAL_SEED,
+                        stage="stage_b_test",
+                        group="lite_e10",
+                        compute_kind="stage_b_test",
+                        config={
+                            "dataset": dataset,
+                            "contamination_ratio": contamination,
+                            "clean_ratio": clean_ratio,
+                            "fold": fold,
+                            "n_folds": LITE_E10_FOLDS,
+                            "seed": FORMAL_SEED,
+                            "protocol": "three-day-lite",
+                        },
+                        command=(
+                            python_exe,
+                            str(
+                                REPO_ROOT
+                                / "scripts"
+                                / "rebuttal"
+                                / "muqn"
+                                / "run_contamination_sweep.py"
+                            ),
+                            "--base_experiment_dir",
+                            str(anchor.artifact_dir),
+                            "--fold_manifest",
+                            str(protocol_dir / "contamination_fold_manifest.json"),
+                            "--artifact_root",
+                            str(artifact_root),
+                            "--target_experiment_dir",
+                            str(artifact_root / name),
+                            "--contamination_ratios",
+                            str(contamination),
+                            "--n_folds",
+                            str(LITE_E10_FOLDS),
+                            "--folds",
+                            str(fold),
+                            "--clean_ratio",
+                            str(clean_ratio),
+                            "--seed",
+                            "42",
+                        ),
+                        artifact_dir=artifact_root / name,
+                        required_artifacts=FULL_AUDIT_REQUIRED
+                        + ("contamination_protocol.json",),
+                        dependencies=(anchor.run_id, protocol.run_id),
+                        metadata={"environment": {"SCAR_METRIC_WORKERS": "8"}},
+                    )
+                    e10_runs.append(task)
+                    tasks.append(task)
+
+            for purification, source in (
+                (
+                    "no",
+                    artifact_root
+                    / f"scar_lite_e9_{dataset.lower()}_clean_0p0",
+                ),
+                ("default", anchor.artifact_dir),
+            ):
+                name = (
+                    f"scar_lite_e10_zero_{dataset.lower()}_{purification}_fold_{fold}"
+                )
+                dependency = (
+                    next(
+                        task.run_id
+                        for task in e9_sources
+                        if task.dataset == dataset
+                        and float(task.config["clean_ratio"]) == 0.0
+                    )
+                    if purification == "no"
+                    else anchor.run_id
+                )
+                tasks.append(
+                    _analysis_task(
+                        artifact_root=artifact_root,
+                        method="SCAR",
+                        dataset=dataset,
+                        group="lite_e10_zero",
+                        name=name,
+                        config={
+                            "source_experiment": str(source),
+                            "fold": fold,
+                            "purification": purification,
+                            "seed": FORMAL_SEED,
+                        },
+                        command=(
+                            python_exe,
+                            str(
+                                REPO_ROOT
+                                / "scripts"
+                                / "rebuttal"
+                                / "muqn"
+                                / "reevaluate_zero_contamination.py"
+                            ),
+                            "--experiment-dir",
+                            str(source),
+                            "--fold",
+                            str(fold),
+                            "--fold-manifest",
+                            str(protocol_dir / "contamination_fold_manifest.json"),
+                            "--seed",
+                            "42",
+                            "--output-dir",
+                            str(artifact_root / name),
+                        ),
+                        required=("heldout_metrics.json", "evaluation_mask.npy"),
+                        dependencies=(dependency, protocol.run_id),
+                    )
+                )
+
+        fit_name = f"scar_lite_e29_{dataset.lower()}_l512_seed42"
+        e29_fit = _scar_task(
+            artifact_root=artifact_root,
+            python_exe=python_exe,
+            dataset=dataset,
+            group="lite_e29",
+            compute_kind="full_model_fit",
+            experiment_name=fit_name,
+            config={**FORMAL_DATASET_PROFILES[dataset], "seq_len": 512},
+        )
+        e29_fits[dataset] = e29_fit
+        tasks.append(e29_fit)
+        for seq_len, source, dependencies in (
+            (128, anchor.artifact_dir, (anchor.run_id,)),
+            (512, e29_fit.artifact_dir, (e29_fit.run_id,)),
+        ):
+            tasks.append(
+                _strategy_task(
+                    artifact_root=artifact_root,
+                    python_exe=python_exe,
+                    dataset=dataset,
+                    group="lite_e29",
+                    source_experiment=source,
+                    strategy="global",
+                    name=f"scar_lite_e29_{dataset.lower()}_l{seq_len}_global",
+                    extra_config={"seq_len": seq_len, "lite_endpoint": True},
+                    dependencies=dependencies,
+                )
+            )
+
+        for patch_size in LITE_E30_PATCHES:
+            fit_name = f"scar_lite_e30_{dataset.lower()}_p{patch_size}_seed42"
+            fit = _scar_task(
+                artifact_root=artifact_root,
+                python_exe=python_exe,
+                dataset=dataset,
+                group="lite_e30",
+                compute_kind="full_model_fit",
+                experiment_name=fit_name,
+                config={
+                    **FORMAL_DATASET_PROFILES[dataset],
+                    "patch_sizes": [patch_size],
+                },
+            )
+            tasks.append(fit)
+            tasks.append(
+                _strategy_task(
+                    artifact_root=artifact_root,
+                    python_exe=python_exe,
+                    dataset=dataset,
+                    group="lite_e30",
+                    source_experiment=fit.artifact_dir,
+                    strategy="global",
+                    name=f"scar_lite_e30_{dataset.lower()}_p{patch_size}_global",
+                    extra_config={
+                        "patch_sizes": [patch_size],
+                        "lite_endpoint": True,
+                    },
+                    dependencies=(fit.run_id,),
+                )
+            )
+
+        q_rows: list[tuple[float, RunSpec]] = []
+        for keep_ratio in LITE_E31_KEEP_RATIOS:
+            if keep_ratio == 1.0:
+                continue
+            name = (
+                f"scar_lite_e31_{dataset.lower()}_l512_q"
+                f"{str(keep_ratio).replace('.', 'p')}"
+            )
+            task = _scar_task(
+                artifact_root=artifact_root,
+                python_exe=python_exe,
+                dataset=dataset,
+                group="lite_e31",
+                compute_kind="stage_b_test",
+                experiment_name=name,
+                config={
+                    **FORMAL_DATASET_PROFILES[dataset],
+                    "seq_len": 512,
+                    "coreset_keep_ratio": keep_ratio,
+                    "base_experiment_dir": str(e29_fit.artifact_dir),
+                },
+                stage="stage_b_test",
+                dependencies=(e29_fit.run_id,),
+            )
+            q_rows.append((keep_ratio, task))
+            tasks.append(task)
+        e31_q_tasks[dataset] = q_rows
+
+        for method in ("KNN", "LOF"):
+            name = f"baseline_{method.lower()}_{dataset.lower()}_seed42"
+            tasks.append(
+                RunSpec(
+                    method=method,
+                    dataset=dataset,
+                    seed=FORMAL_SEED,
+                    stage="full",
+                    group="lite_classical_baselines",
+                    compute_kind="full_model_fit",
+                    config={
+                        "seed": FORMAL_SEED,
+                        "dataset": dataset,
+                        "feature_protocol": "per_timestamp_multivariate_vector",
+                        "reference_cap": 50_000,
+                    },
+                    command=(
+                        python_exe,
+                        str(
+                            REPO_ROOT
+                            / "scripts"
+                            / "rebuttal"
+                            / "baselines"
+                            / "run_baseline.py"
+                        ),
+                        "--method",
+                        method,
+                        "--dataset",
+                        dataset,
+                        "--output-dir",
+                        str(artifact_root / name),
+                        "--source-experiment",
+                        str(anchor.artifact_dir),
+                        "--scar-python",
+                        python_exe,
+                        "--baseline-python",
+                        python_exe,
+                        "--seed",
+                        "42",
+                    ),
+                    artifact_dir=artifact_root / name,
+                    required_artifacts=(
+                        "scores.npy",
+                        "labels.npy",
+                        "metrics.json",
+                        "run_manifest.json",
+                        "baseline_protocol.json",
+                        "timing.json",
+                        "resource_metrics.json",
+                        "memory_metrics.json",
+                        "scalability.json",
+                        "scalability.csv",
+                        "model.pkl",
+                    ),
+                    dependencies=(anchor.run_id,),
+                )
+            )
+
+    tasks.append(
+        _analysis_task(
+            artifact_root=artifact_root,
+            method="SCAR",
+            dataset="ALL",
+            group="lite_e11_e12",
+            name="scar_lite_e11_e12_purification_summary",
+            config={
+                "datasets": list(MAIN_DATASETS),
+                "e9_ratios": [0.0, 0.02, 0.10],
+                "e10_ratios": list(LITE_E10_RATIOS),
+                "n_folds": LITE_E10_FOLDS,
+                "rare_normal_quantile": 0.90,
+            },
+            command=(
+                python_exe,
+                str(
+                    REPO_ROOT
+                    / "scripts"
+                    / "rebuttal"
+                    / "muqn"
+                    / "collect_purification_sweep.py"
+                ),
+                "--artifact-root",
+                str(artifact_root),
+                "--output-dir",
+                str(artifact_root / "scar_lite_e11_e12_purification_summary"),
+                "--datasets",
+                *MAIN_DATASETS,
+                "--e9-ratios",
+                "0",
+                "0.02",
+                "0.10",
+                "--e10-ratios",
+                *(str(value) for value in LITE_E10_RATIOS),
+                "--n-folds",
+                str(LITE_E10_FOLDS),
+                "--experiment-prefix",
+                "scar_lite",
+                "--lightweight-e10",
+            ),
+            required=(
+                "e11_rare_normal.csv",
+                "e12_low_error_survival.csv",
+                "purification_summary.json",
+            ),
+            dependencies=tuple(
+                [
+                    *(task.run_id for task in anchors.values()),
+                    *(task.run_id for task in e9_sources),
+                    *(task.run_id for task in e10_runs),
+                ]
+            ),
+        )
+    )
+
+    for dataset in MAIN_DATASETS:
+        token = dataset.lower()
+        output_name = f"scar_lite_e31_{token}_budget_global"
+        q_args = [
+            item
+            for ratio, task in e31_q_tasks[dataset]
+            for item in ("--q-experiment", f"{ratio}={task.artifact_dir}")
+        ]
+        tasks.append(
+            _analysis_task(
+                artifact_root=artifact_root,
+                method="SCAR",
+                dataset=dataset,
+                group="lite_e31",
+                name=output_name,
+                config={
+                    "target_experiment": str(anchors[dataset].artifact_dir),
+                    "base_experiment": str(e29_fits[dataset].artifact_dir),
+                    "keep_ratios": list(LITE_E31_KEEP_RATIOS),
+                    "top_k": list(LITE_E31_TOP_K),
+                    "tolerance": 0.15,
+                    "selection_uses_test_performance": False,
+                },
+                command=(
+                    python_exe,
+                    str(REPO_ROOT / "scripts" / "experiments" / "match_budget_lite.py"),
+                    "--target-experiment",
+                    str(anchors[dataset].artifact_dir),
+                    "--base-experiment",
+                    str(e29_fits[dataset].artifact_dir),
+                    *q_args,
+                    "--top-k",
+                    *(str(value) for value in LITE_E31_TOP_K),
+                    "--output-dir",
+                    str(artifact_root / output_name),
+                    "--tolerance",
+                    "0.15",
+                ),
+                required=(
+                    "budget_match.json",
+                    "budget_match.csv",
+                    "parameter_selection.json",
+                    "scores.npy",
+                    "scores_raw_max.npy",
+                    "scores_zscore_mean.npy",
+                    "scores_cdf_mean.npy",
+                    "scores_cdf_max.npy",
+                    "scores_knn_distance.npy",
+                    "scores_state_novelty.npy",
+                    "scores_completion_scale8.npy",
+                    "scores_completion_scale32.npy",
+                    "diagnostics.npz",
+                    "metrics.json",
+                    "run_manifest.json",
+                    "retrieval_global.npz",
+                ),
+                dependencies=(
+                    anchors[dataset].run_id,
+                    e29_fits[dataset].run_id,
+                    *(task.run_id for _, task in e31_q_tasks[dataset]),
+                ),
+            )
+        )
+
+    tasks.append(
+        _analysis_task(
+            artifact_root=artifact_root,
+            method="SCAR",
+            dataset="TEP",
+            group="lite_real_case",
+            name="scar_lite_real_condition_case",
+            config={
+                "source_experiment": str(artifact_root / "scar_tep_full_seed42"),
+                "fault_id": 10,
+                "modes": [1, 2, 3, 4, 5, 6],
+                "top_k": 10,
+                "selection_rule": "fixed fault, highest registered cdf_mean window",
+            },
+            command=(
+                python_exe,
+                str(REPO_ROOT / "scripts" / "tep" / "generate_rebuttal_tables.py"),
+                "--full-experiment",
+                str(artifact_root / "scar_tep_full_seed42"),
+                "--output-dir",
+                str(artifact_root / "scar_lite_real_condition_case"),
+                "--case-only",
+            ),
+            required=(
+                "table_t10_real_condition_cases.csv",
+                "table_t10_real_condition_cases.md",
+                "tep_rebuttal_tables.json",
+            ),
+        )
+    )
+
+    collector_dependencies = tuple(task.run_id for task in tasks)
+    tasks.append(
+        _analysis_task(
+            artifact_root=artifact_root,
+            method="SCAR",
+            dataset="ALL",
+            group="lite_collect",
+            name="scar_lite_tables",
+            config={
+                "scope": "five-dataset-three-day-lite",
+                "output_mode": "tables_and_text_only",
+            },
+            command=(
+                python_exe,
+                str(REPO_ROOT / "scripts" / "experiments" / "collect_lite_tables.py"),
+                "--artifact-root",
+                str(artifact_root),
+                "--output-dir",
+                str(artifact_root / "scar_lite_tables"),
+            ),
+            required=(
+                "table_lite_e10.csv",
+                "table_lite_e11_rare_normal.csv",
+                "table_lite_e12_low_error_survival.csv",
+                "table_lite_e29_window.csv",
+                "table_lite_e30_patch.csv",
+                "table_lite_e31_budget.csv",
+                "table_lite_knn_lof_performance.csv",
+                "table_lite_knn_lof_resources.csv",
+                "table_lite_knn_lof_scalability.csv",
+                "table_lite_real_condition_cases.csv",
+                "lite_tables.json",
+                "lite_tables.txt",
+            ),
+            dependencies=collector_dependencies,
+        )
+    )
+    if len({task.run_id for task in tasks}) != len(tasks):
+        raise ValueError("Lightweight rebuttal protocol contains duplicate run IDs.")
     return [_with_metric_workers(task) for task in tasks]

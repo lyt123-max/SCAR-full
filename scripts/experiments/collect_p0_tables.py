@@ -18,7 +18,7 @@ from scripts.experiments.score_outputs import flatten_score_metrics
 
 
 MAIN_DATASETS = ("MSL", "PSM", "SMAP", "SMD", "SWAT")
-BASELINES = ("PaAno", "PUAD", "PGRF-Net")
+BASELINES = ("PaAno", "PUAD", "PGRF-Net", "KNN", "LOF")
 E9_RATIOS = (0.0, 0.005, 0.01, 0.02, 0.05, 0.10)
 CATCH_DATASET_COUNT = 30
 TSB_EXPECTED = {("M", "tuning"): 20, ("M", "eval"): 180, ("U", "tuning"): 48, ("U", "eval"): 350}
@@ -151,6 +151,7 @@ def collect(artifact_root: Path, output_dir: Path, *, strict: bool) -> dict[str,
 
     baseline_rows = []
     efficiency_rows = []
+    classical_scalability_rows = []
     for dataset in MAIN_DATASETS:
         scar_dir = artifact_root / f"scar_main_{dataset.lower()}_seed42"
         scar_resource = required(scar_dir / "resource_metrics.json")
@@ -181,20 +182,39 @@ def collect(artifact_root: Path, output_dir: Path, *, strict: bool) -> dict[str,
                     }
                 )
             if timing and resource:
-                efficiency_rows.append(
-                    {
-                        "method": method,
-                        "dataset": dataset,
-                        **{
-                            f"resource.{key}": value
-                            for key, value in _flatten(_load(resource)).items()
-                        },
-                        **{
-                            f"timing.{key}": value
-                            for key, value in _flatten(_load(timing)).items()
-                        },
-                    }
-                )
+                row = {
+                    "method": method,
+                    "dataset": dataset,
+                    **{
+                        f"resource.{key}": value
+                        for key, value in _flatten(_load(resource)).items()
+                    },
+                    **{
+                        f"timing.{key}": value
+                        for key, value in _flatten(_load(timing)).items()
+                    },
+                }
+                memory_path = experiment / "memory_metrics.json"
+                if method in {"KNN", "LOF"}:
+                    memory = required(memory_path)
+                    scalability = required(experiment / "scalability.json")
+                    if memory:
+                        row.update(
+                            {
+                                f"memory.{key}": value
+                                for key, value in _flatten(_load(memory)).items()
+                            }
+                        )
+                    if scalability:
+                        classical_scalability_rows.extend(
+                            {
+                                "method": method,
+                                "dataset": dataset,
+                                **scalability_row,
+                            }
+                            for scalability_row in _load(scalability)["rows"]
+                        )
+                efficiency_rows.append(row)
 
     catch_rows = []
     for metrics in sorted(artifact_root.glob("scar_catch_*_seed42/test_metrics.json")):
@@ -331,6 +351,7 @@ def collect(artifact_root: Path, output_dir: Path, *, strict: bool) -> dict[str,
         "table_p0_tep_scores.csv": tep_rows,
         "table_p0_baselines.csv": baseline_rows,
         "table_p0_efficiency.csv": efficiency_rows,
+        "table_p0_classical_scalability.csv": classical_scalability_rows,
         "table_p0_catch.csv": catch_rows,
         "table_p0_e9.csv": e9_rows,
         "table_p0_e10.csv": e10_rows,

@@ -4,11 +4,25 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import sys
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from tep_common import (
+    empirical_percentile,
+    load_fault_log_fields,
+    load_train_state_meta,
+    load_window_logs,
+)
 
 T9_METRICS = [
     "SMC@K",
@@ -26,10 +40,13 @@ T9_METRICS = [
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Generate TEP rebuttal tables T2 and T9.")
+    parser = argparse.ArgumentParser(
+        description="Generate TEP rebuttal tables T2, T9, and T10."
+    )
     parser.add_argument("--full-experiment", type=Path, required=True)
     parser.add_argument("--selected-experiment", type=Path, default=None)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--case-only", action="store_true")
     return parser.parse_args()
 
 
@@ -170,9 +187,142 @@ def build_t9(
     return rows
 
 
+def _dominant_mode(values: np.ndarray) -> int:
+    valid = [int(value) for value in np.asarray(values).reshape(-1) if int(value) >= 0]
+    if not valid:
+        return -1
+    counts = Counter(valid)
+    return min(counts, key=lambda key: (-counts[key], key))
+
+
+def build_t10(
+    full_experiment: Path,
+    *,
+    fault_id: int = 10,
+    top_k: int = 10,
+) -> list[dict[str, Any]]:
+    log_dir = full_experiment / "tep_mechanism"
+    audit = load_window_logs(log_dir, prefix="audit_normal_window_logs")
+    fault = load_fault_log_fields(
+        log_dir,
+        (
+            "file_id",
+            "mode_id",
+            "fault_id",
+            "start",
+            "final",
+            "memory_distance",
+            "state_novelty",
+            "topk_neighbor_window_ids",
+            "topk_neighbor_mode_ids",
+            "topk_neighbor_distances",
+        ),
+    )
+    train = load_train_state_meta(log_dir)
+    train_ids = np.asarray(train["window_id"], dtype=np.int64)
+    train_files = np.asarray(train["file_id"], dtype=object)
+    train_starts = np.asarray(train["start"], dtype=np.int64)
+    train_modes = np.asarray(train["mode_id"], dtype=np.int32)
+    file_offsets = {
+        str(file_id): int(np.min(train_starts[train_files == file_id]))
+        for file_id in np.unique(train_files)
+    }
+    train_lookup = {
+        int(window_id): {
+            "file_id": str(file_id),
+            "start": int(start) - file_offsets[str(file_id)],
+            "mode_id": int(mode),
+        }
+        for window_id, file_id, start, mode in zip(
+            train_ids,
+            train_files,
+            train_starts,
+            train_modes,
+        )
+    }
+    audit_final = np.asarray(audit["final"], dtype=np.float64)
+    audit_memory = np.asarray(audit["memory_distance"], dtype=np.float64)
+    audit_novelty = np.asarray(audit["state_novelty"], dtype=np.float64)
+    fault_modes = np.asarray(fault["mode_id"], dtype=np.int32)
+    fault_ids = np.asarray(fault["fault_id"], dtype=np.int32)
+    final_scores = np.asarray(fault["final"], dtype=np.float64)
+    rows: list[dict[str, Any]] = []
+    for mode in range(1, 7):
+        candidates = np.flatnonzero(
+            np.logical_and(fault_modes == mode, fault_ids == int(fault_id))
+        )
+        if candidates.size == 0:
+            raise ValueError(f"TEP real-case table lacks Mode {mode}, IDV{fault_id}.")
+        index = int(candidates[np.nanargmax(final_scores[candidates])])
+        neighbor_ids = np.asarray(
+            fault["topk_neighbor_window_ids"][index], dtype=np.int64
+        )[:top_k]
+        neighbor_modes = np.asarray(
+            fault["topk_neighbor_mode_ids"][index], dtype=np.int32
+        )[:top_k]
+        neighbor_distances = np.asarray(
+            fault["topk_neighbor_distances"][index], dtype=np.float64
+        )[:top_k]
+        valid = np.logical_and(neighbor_ids >= 0, np.isfinite(neighbor_distances))
+        if not np.any(valid):
+            raise ValueError(f"TEP Mode {mode}, IDV{fault_id} has no valid reference.")
+        first_position = int(np.flatnonzero(valid)[0])
+        reference = train_lookup.get(int(neighbor_ids[first_position]))
+        if reference is None:
+            raise KeyError(
+                f"Unknown TEP train window id {int(neighbor_ids[first_position])}."
+            )
+        valid_modes = neighbor_modes[valid]
+        score = float(final_scores[index])
+        memory = float(np.asarray(fault["memory_distance"])[index])
+        novelty = float(np.asarray(fault["state_novelty"])[index])
+        rows.append(
+            {
+                "Query mode": mode,
+                "Fixed disturbance": f"IDV{fault_id}",
+                "Query file": str(np.asarray(fault["file_id"], dtype=object)[index]),
+                "Query start": int(np.asarray(fault["start"])[index]),
+                "Nearest normal mode": int(reference["mode_id"]),
+                "Nearest normal file": reference["file_id"],
+                "Nearest normal start": int(reference["start"]),
+                "Nearest context distance": float(neighbor_distances[first_position]),
+                f"Same-mode ratio@{top_k}": float(np.mean(valid_modes == mode)),
+                f"Dominant retrieved mode@{top_k}": _dominant_mode(valid_modes),
+                "Final-score normal percentile": float(
+                    empirical_percentile(audit_final, np.asarray([score]))[0]
+                ),
+                "Memory-distance normal percentile": float(
+                    empirical_percentile(audit_memory, np.asarray([memory]))[0]
+                ),
+                "State-novelty normal percentile": float(
+                    empirical_percentile(audit_novelty, np.asarray([novelty]))[0]
+                ),
+                "Selection rule": (
+                    f"highest registered cdf_mean window within fixed IDV{fault_id}"
+                ),
+            }
+        )
+    return rows
+
+
 def main() -> None:
     args = parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
+    if args.case_only:
+        t10_rows = build_t10(args.full_experiment)
+        write_csv(args.output_dir / "table_t10_real_condition_cases.csv", t10_rows)
+        (args.output_dir / "table_t10_real_condition_cases.md").write_text(
+            "# Table T10: Real Operating-Condition Retrieval Cases\n\n"
+            + markdown_table(t10_rows)
+            + "\n",
+            encoding="utf-8",
+        )
+        (args.output_dir / "tep_rebuttal_tables.json").write_text(
+            json.dumps({"T10": t10_rows}, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        print(f"[TEP Tables] wrote T10 to {args.output_dir}")
+        return
     selected_experiment = (
         args.selected_experiment
         if args.selected_experiment is not None
@@ -180,9 +330,11 @@ def main() -> None:
     )
     t2_rows = build_t2(args.full_experiment)
     t9_rows = build_t9(args.full_experiment, selected_experiment)
+    t10_rows = build_t10(args.full_experiment)
 
     write_csv(args.output_dir / "table_t2_tep_availability.csv", t2_rows)
     write_csv(args.output_dir / "table_t9_tep_subset_robustness.csv", t9_rows)
+    write_csv(args.output_dir / "table_t10_real_condition_cases.csv", t10_rows)
     (args.output_dir / "table_t2_tep_availability.md").write_text(
         "# Table T2: TEP Mode-Fault Availability\n\n" + markdown_table(t2_rows) + "\n",
         encoding="utf-8",
@@ -191,12 +343,22 @@ def main() -> None:
         "# Table T9: TEP Subset Robustness\n\n" + markdown_table(t9_rows) + "\n",
         encoding="utf-8",
     )
+    (args.output_dir / "table_t10_real_condition_cases.md").write_text(
+        "# Table T10: Real Operating-Condition Retrieval Cases\n\n"
+        + markdown_table(t10_rows)
+        + "\n",
+        encoding="utf-8",
+    )
     (args.output_dir / "tep_rebuttal_tables.json").write_text(
-        json.dumps({"T2": t2_rows, "T9": t9_rows}, indent=2, ensure_ascii=False),
+        json.dumps(
+            {"T2": t2_rows, "T9": t9_rows, "T10": t10_rows},
+            indent=2,
+            ensure_ascii=False,
+        ),
         encoding="utf-8",
     )
     print(
-        f"[TEP Tables] wrote T2/T9 to {args.output_dir}; "
+        f"[TEP Tables] wrote T2/T9/T10 to {args.output_dir}; "
         f"selected={selected_experiment}"
     )
 

@@ -13,7 +13,11 @@ if __package__ in {None, ""}:
     if str(REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(REPO_ROOT))
     from scripts.experiments.manifest import RunSpec, artifact_is_complete, artifact_is_reusable
-    from scripts.experiments.protocol import build_p0_tasks, build_p1_tasks
+    from scripts.experiments.protocol import (
+        build_lite_tasks,
+        build_p0_tasks,
+        build_p1_tasks,
+    )
     from scripts.experiments.runner import (
         execute_tasks,
         execution_is_reusable,
@@ -23,7 +27,7 @@ if __package__ in {None, ""}:
 else:
     REPO_ROOT = Path(__file__).resolve().parents[2]
     from .manifest import RunSpec, artifact_is_complete, artifact_is_reusable
-    from .protocol import build_p0_tasks, build_p1_tasks
+    from .protocol import build_lite_tasks, build_p0_tasks, build_p1_tasks
     from .runner import execute_tasks, execution_is_reusable, freeze_environment, write_plan
 
 
@@ -47,15 +51,20 @@ def select_tasks(
     methods: set[str] | None = None,
     datasets: set[str] | None = None,
 ) -> list[RunSpec]:
-    if scope not in {"ac-core", "p0", "p1", "all"}:
-        raise ValueError("scope must be one of ac-core, p0, p1, all")
+    if scope not in {"ac-core", "lite", "p0", "p1", "all"}:
+        raise ValueError("scope must be one of ac-core, lite, p0, p1, all")
     tasks: list[RunSpec] = []
+    if scope == "lite":
+        tasks.extend(build_lite_tasks(artifact_root, python_exe=python_exe))
     if scope in {"ac-core", "p0", "all"}:
         tasks.extend(build_p0_tasks(artifact_root, python_exe=python_exe))
     if scope in {"p1", "all"}:
         tasks.extend(build_p1_tasks(artifact_root, python_exe=python_exe))
     if scope == "ac-core":
         tasks = [task for task in tasks if task.group in AC_CORE_GROUPS]
+        # The running A/B shard contract is frozen at 102 tasks. Native
+        # KNN/LOF were added later to the independent lightweight queue.
+        tasks = [task for task in tasks if task.method not in {"KNN", "LOF"}]
     if groups:
         tasks = [task for task in tasks if task.group in groups]
     if methods:
@@ -261,7 +270,9 @@ def parse_args() -> argparse.Namespace:
     for action in ("plan", "run", "resume", "status", "validate", "collect"):
         command = subparsers.add_parser(action)
         command.add_argument(
-            "--scope", choices=["ac-core", "p0", "p1", "all"], default="all"
+            "--scope",
+            choices=["ac-core", "lite", "p0", "p1", "all"],
+            default="all",
         )
         command.add_argument("--group", nargs="+", default=None)
         command.add_argument("--method", nargs="+", default=None)

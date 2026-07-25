@@ -25,7 +25,7 @@ def main() -> int:
         or "stronger purification `clean_ratio=0.10`" in joined,
         "no_stale_stronger_0p05": "stronger (`0.05`)" not in joined
         and "stronger purification `clean_ratio=0.05`" not in joined,
-        "p0_counts": "649 次 full model fit" in joined
+        "p0_counts": "659 次 full model fit" in joined
         and "180 次 Stage-B/Test" in joined,
         "tsb_official_598": "598" in joined and "U-Eva 350" in joined,
         "formal_table_only": "不提交任何图" in joined or "不允许提交图片" in joined,
@@ -33,7 +33,7 @@ def main() -> int:
         "e10_frozen_protocol": "contamination_fold_manifest.json" in joined,
         "data_root_map_documented": "--data-root-map" in joined,
         "p0_table_collector": "p0_tables" in joined,
-        "manifest_total_1220": "1220" in joined,
+        "manifest_total_1074": "1074" in joined,
         "catch_reported_only": "CATCH 不重跑" in joined
         and "reported from CATCH" in joined,
     }

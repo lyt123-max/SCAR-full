@@ -9,13 +9,16 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-FORMAL_METHODS = ("PaAno", "PUAD", "PGRF-Net")
+FORMAL_METHODS = ("PaAno", "PUAD", "PGRF-Net", "KNN", "LOF")
+NATIVE_METHODS = ("KNN", "LOF")
 ADAPTERS = {
     "PaAno": "run_paano_adapter.py",
     "MEMTO": "run_memto_adapter.py",
     "PUAD": "run_puad_adapter.py",
     "PGRF-Net": "run_pgrf_adapter.py",
     "CATCH": "run_catch_adapter.py",
+    "KNN": "run_classical_adapter.py",
+    "LOF": "run_classical_adapter.py",
 }
 UPSTREAM_DIRS = {
     "PaAno": "PaAno",
@@ -77,24 +80,27 @@ def build_adapter_command(
         "--device",
         device,
     ]
+    if method in NATIVE_METHODS:
+        command.extend(["--method", method])
     if smoke:
-        command.extend(
-            {
-                "PaAno": ["--num-iters", "1", "--batch-size", "128"],
-                "MEMTO": ["--epochs", "1"],
-                "PUAD": ["--epochs", "1"],
-                "PGRF-Net": [
-                    "--epochs-stage1",
-                    "1",
-                    "--epochs-stage2",
-                    "1",
-                    "--patience-stage1",
-                    "1",
-                    "--patience-stage2",
-                    "1",
-                ],
-            }[method]
-        )
+        smoke_args = {
+            "PaAno": ["--num-iters", "1", "--batch-size", "128"],
+            "MEMTO": ["--epochs", "1"],
+            "PUAD": ["--epochs", "1"],
+            "PGRF-Net": [
+                "--epochs-stage1",
+                "1",
+                "--epochs-stage2",
+                "1",
+                "--patience-stage1",
+                "1",
+                "--patience-stage2",
+                "1",
+            ],
+            "KNN": ["--smoke"],
+            "LOF": ["--smoke"],
+        }[method]
+        command.extend(smoke_args)
     return command
 
 
@@ -126,15 +132,17 @@ def main() -> int:
         if args.source_experiment is not None
         else output_dir.parent / f"scar_main_{args.dataset.lower()}_seed42"
     )
-    upstream = REPO_ROOT / "third_party" / "baselines" / UPSTREAM_DIRS[args.method]
-    if not upstream.is_dir():
-        raise FileNotFoundError(f"Missing pinned upstream repository: {upstream}.")
-    commit = _git_commit(upstream)
-    if commit != PINNED_COMMITS[args.method]:
-        raise ValueError(
-            f"{args.method} upstream commit mismatch: {commit} != "
-            f"{PINNED_COMMITS[args.method]}."
-        )
+    commit = None
+    if args.method not in NATIVE_METHODS:
+        upstream = REPO_ROOT / "third_party" / "baselines" / UPSTREAM_DIRS[args.method]
+        if not upstream.is_dir():
+            raise FileNotFoundError(f"Missing pinned upstream repository: {upstream}.")
+        commit = _git_commit(upstream)
+        if commit != PINNED_COMMITS[args.method]:
+            raise ValueError(
+                f"{args.method} upstream commit mismatch: {commit} != "
+                f"{PINNED_COMMITS[args.method]}."
+            )
     source_hash = _source_hash(source)
     data_dir = output_dir / "prepared_data"
     prepare_command = [
@@ -152,6 +160,7 @@ def main() -> int:
         "--output_dir",
         str(data_dir),
     ]
+    effective_device = "cpu" if args.method in NATIVE_METHODS else args.device
     adapter_command = build_adapter_command(
         method=args.method,
         baseline_python=str(args.baseline_python),
@@ -159,7 +168,7 @@ def main() -> int:
         output_dir=output_dir,
         dataset=args.dataset,
         seed=args.seed,
-        device=args.device,
+        device=effective_device,
         smoke=args.smoke,
     )
     monitor_command = [
@@ -176,7 +185,7 @@ def main() -> int:
         "--stage",
         "train",
         "--device",
-        args.device,
+        effective_device,
         "--",
         *adapter_command,
     ]
@@ -188,6 +197,11 @@ def main() -> int:
         "source_experiment": str(source),
         "source_config_sha256": source_hash,
         "upstream_commit": commit,
+        "implementation_origin": (
+            "project_native_sklearn"
+            if args.method in NATIVE_METHODS
+            else "pinned_upstream_adapter"
+        ),
         "prepare_command": prepare_command,
         "adapter_command": adapter_command,
         "monitor_command": monitor_command,
@@ -219,6 +233,13 @@ def main() -> int:
         "timing.json",
         "resource_metrics.json",
     )
+    if args.method in NATIVE_METHODS:
+        required = required + (
+            "memory_metrics.json",
+            "scalability.json",
+            "scalability.csv",
+            "model.pkl",
+        )
     missing = [
         name
         for name in required

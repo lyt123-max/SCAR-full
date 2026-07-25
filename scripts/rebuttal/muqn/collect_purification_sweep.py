@@ -48,17 +48,28 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Collect E11/E12 from E9/E10 audits.")
     parser.add_argument("--artifact-root", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--datasets", nargs="+", default=list(DATASETS))
+    parser.add_argument("--e9-ratios", type=float, nargs="+", default=list(E9_RATIOS))
+    parser.add_argument("--e10-ratios", type=float, nargs="+", default=list(E10_RATIOS))
+    parser.add_argument("--n-folds", type=int, default=3)
+    parser.add_argument("--experiment-prefix", default="scar")
+    parser.add_argument(
+        "--lightweight-e10",
+        action="store_true",
+        help="Use default purification at 1/5% and no/default/strong at 10%.",
+    )
     args = parser.parse_args()
     root = args.artifact_root.resolve()
     args.output_dir.mkdir(parents=True, exist_ok=True)
     e11_rows = []
     e12_rows = []
-    for dataset in DATASETS:
-        for ratio in E9_RATIOS:
+    for dataset in args.datasets:
+        for ratio in args.e9_ratios:
             experiment = (
                 root / f"scar_main_{dataset.lower()}_seed42"
                 if ratio == 0.02
-                else root / f"scar_e9_{dataset.lower()}_clean_{token(ratio)}"
+                else root
+                / f"{args.experiment_prefix}_e9_{dataset.lower()}_clean_{token(ratio)}"
             )
             detail = args.output_dir / "details" / f"e9_{dataset}_{token(ratio)}"
             payload = _analyze(experiment, detail)
@@ -73,12 +84,23 @@ def main() -> None:
                             **row,
                         }
                     )
-        for fold in range(3):
-            for contamination in E10_RATIOS:
-                clean_values = (0.0, 0.02, 0.10) if contamination == 0.10 else (0.0, 0.02)
+        for fold in range(args.n_folds):
+            for contamination in args.e10_ratios:
+                if args.lightweight_e10:
+                    clean_values = (
+                        (0.0, 0.02, 0.10)
+                        if contamination == 0.10
+                        else (0.02,)
+                    )
+                else:
+                    clean_values = (
+                        (0.0, 0.02, 0.10)
+                        if contamination == 0.10
+                        else (0.0, 0.02)
+                    )
                 for clean_ratio in clean_values:
                     name = (
-                        f"scar_e10_{dataset.lower()}_contam_{token(contamination)}"
+                        f"{args.experiment_prefix}_e10_{dataset.lower()}_contam_{token(contamination)}"
                         f"_clean_{token(clean_ratio)}_fold_{fold}"
                     )
                     payload = _analyze(root / name, args.output_dir / "details" / name)

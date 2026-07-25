@@ -570,7 +570,7 @@ python run.py --stage full --data_format tsb_ad \
 | `plot_mechanism_figures.py` | 绘制核心机制图。 |
 | `export_paper_mechanism_figures.py` | 导出论文机制图。 |
 | `export_full_mechanism_suite.py` | 导出完整机制图、表和案例套件。 |
-| `generate_rebuttal_tables.py` | 生成 T2 六模式故障可用性表和 T9 selected/full 机制指标对比表。 |
+| `generate_rebuttal_tables.py` | 生成 T2 六模式故障可用性表、T9 selected/full 机制指标对比表，以及固定 IDV10、六工况各一行的 T10 真实检索案例表；`--case-only` 只生成 T10。 |
 
 ### 9.5 `scripts/tsb_ad/`
 
@@ -889,7 +889,7 @@ rebuttal 必需项。完整任务矩阵和表格字段以 `rebuttal执行计划.
 `clean_ratio=0` 的逐点分数按三折 mask 重评估，只运行 135 个非零污染
 Stage-B/Test；E38 复用 `coreset_keep_ratio=1.0`，只新增 20 个 Stage-B/Test；
 按 M/U 各验证一个预注册配置核算，TSB-AD 为 tuning 68 加 official evaluation 530，
-共 598 次 full。完整 P0 为 649 次 full model fit 和 180 次 Stage-B/Test；若在 tuning
+共 598 次 full。完整 P0 为 659 次 full model fit 和 180 次 Stage-B/Test；若在 tuning
 清单比较多组配置，额外运行量按 `20×H_M + 48×H_U` 计算并单独登记。
 
 ## 18. Rebuttal 统一实验入口
@@ -967,6 +967,13 @@ bash scripts/experiments/remote_smoke.sh
 AUROC/AP、1 次预热加 3 次计时、资源 JSON 和运行 manifest。CATCH adapter 仅作为
 论文修订复现工具保留，不进入正式 manifest。
 
+KNN 和 LOF 使用项目侧原生 scikit-learn adapter，输入为每个时间点的多变量向量，
+仅用正常训练段拟合 `StandardScaler` 和邻域模型，不使用测试标签。默认 KNN
+`k=5`、LOF `n_neighbors=20`，参考库以确定性等距采样限制为 50,000 点。两者除统一
+逐点分数和九项指标外，还保存序列化模型字节、原始参考库字节、进程资源、一次预热
+加三次完整推理计时，以及参考库比例 `0.1/0.25/0.5/1.0` 和查询比例
+`0.25/0.5/1.0` 的扩展性表。
+
 `run_baseline.py --smoke` 仅用于远程模型级兼容性检查：PaAno 运行 1 iteration，
 PUAD 运行 1 epoch，PGRF-Net 两阶段各运行 1 epoch 且 patience 为 1。正式
 中央 manifest 不传该参数，仍使用各 adapter 的完整默认训练量。
@@ -991,10 +998,30 @@ PaAno 正式适配遵循其官方 multivariate 启动脚本的 `patch_size=96`�
 `num_iters=100`、`batch_size=512`、`lr=1e-4` 和 RevIN 设置；仅随机种子按本项目
 预注册协议统一为 `42`，不采用上游示例的 `2027`。
 
-当前中央 manifest 共 1220 项：P0 为 893 项，P1 为 327 项；其中实际重计算口径为
-P0 的 649 次 full model fit 与 180 次 Stage-B/Test，新增的 E10 冻结协议和 P0
+完整中央 manifest 共 1074 项：P0 为 903 项，P1 为 171 项；其中实际重计算口径为
+P0 的 659 次 full model fit 与 180 次 Stage-B/Test。P1 的 E30 已与 E29/E31
+统一为五个主数据集，不再把 CATCH synthetic 文件混入该控制实验。新增的 E10 冻结协议和 P0
 表格收口均为 analysis，不增加训练。TEP full 按序列级产物验收，正式要求
 `test_sequence_scores_selected.npy`、序列表、指标、资源、checkpoint、memory、
 fusion 和 full memory audit；`max_test_sequences` 仅供远程 smoke 显式限为 2，
 正式任务保持 `0` 并评估全部 168 条故障序列。中央 manifest 通过环境变量显式传入
 正式 `ARTIFACT_ROOT`，禁止 TEP shell 回退到仓库内默认 `./artifacts`。
+
+三天轻量补充协议使用独立 `--scope lite`，固定 158 项：30 次 full model fit、
+70 次 Stage-B/Test 和 58 次 analysis。若五个正式 anchor 已通过源码、配置、数据和
+产物完整性审计，实际新增 full fit 为 25 次。E10 仅保留污染率 `1%/5%/10%`、
+两折嵌套事件清单，并在 `10%` 做 no/default/stronger 三方对照；E11/E12 直接分析
+E9/E10 full audit。E29 只比较 `L=128/512`，E30 只比较单尺度 `p=8/64` 与默认
+`8+32`，E31 使用 `q=1/0.25/0.10` 和 `top_K=10/20/40` 匹配参数、memory bank 和
+推理延迟，选择过程禁止读取测试性能。该 scope 同时运行五主集 KNN/LOF，并从 TEP
+full 机制日志生成固定 `IDV10`、六工况各一行的真实工况案例表；所有输出仅为 CSV、
+Markdown 表和文字摘要。
+
+```bash
+python scripts/experiments/rebuttal.py plan --scope lite
+python scripts/experiments/rebuttal.py run --scope lite \
+  --max-parallel 4 --gpu-devices 0 1 2 3
+python scripts/experiments/rebuttal.py resume --scope lite \
+  --max-parallel 4 --gpu-devices 0 1 2 3
+python scripts/experiments/rebuttal.py validate --scope lite
+```
