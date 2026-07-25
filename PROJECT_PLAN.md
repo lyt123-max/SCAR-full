@@ -469,6 +469,30 @@ python scripts/tsb_ad/run_benchmark.py --edition M --split eval --seed 42 --devi
 python scripts/tsb_ad/run_benchmark.py --edition U --split eval --seed 42 --device cuda --resume
 ```
 
+远程正式运行当前使用三个节点、六张 RTX 4090，并将官方 598 条任务映射到固定的
+12 个逻辑分片。分片键为官方清单中任务的稳定顺序索引对 12 取模，所有权固定为：
+
+| 节点 | GPU 数 | residue | 正式任务数 | manifest |
+| --- | ---: | --- | ---: | --- |
+| C | 4 | `0,2,3,5,7,8,9,11` | 398 | `/root/autodl-tmp/manifests/tsb_C12local` |
+| D | 1 | `1,10` | 100 | `/root/autodl-tmp/manifests/tsb_D12` |
+| E | 1 | `4,6` | 100 | `/root/autodl-tmp/manifests/tsb_E12` |
+
+所有权审计保存在 C 节点
+`/root/autodl-tmp/manifests/tsb_scaleout/ownership.json`，其 SHA-256 为
+`4a8087615c5bd58dc79ab854b15ba8c31b267b2c1270a05d6152e3cb60629184`。运行中不得
+改变 residue 归属或跨节点抢跑；全局进度按 `(edition, split, file)` 求并集，复制到
+新节点用于断点跳过的完成产物只计一次，活动任务在任意两节点间的交集必须为零。
+新任务固定源码 `a2048c6`，允许保留迁移审计认可的 `bed731b` 完成产物。正式环境
+继续使用 CPU FAISS；隔离 GPU FAISS 实测更慢且非位级确定，不得混入正式队列。
+
+三个节点都在每次派发前执行磁盘保护：数据盘使用率达到 80% 或可用空间低于
+10 GB 时停止新任务，但不得删除源码、原始数据或有效产物。每个 completed 目录
+必须通过 `_test_artifact_error`，全部 `test_scores*.npy` 必须与
+`dataset_metadata.total_length` 等长、有限且非恒定，并递归具备九项注册指标。
+全部 598 条完成后，将 D/E 的有效产物无覆盖地汇回 C，在单一根目录核对
+`observed=unique=598`、`errors=[]` 后再运行 collector。
+
 也可直接运行单个 CSV：
 
 ```bash
