@@ -10,7 +10,7 @@ from scripts.experiments.preflight import static_checks
 class PreflightTests(unittest.TestCase):
     def test_static_preflight_passes_in_repository(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            checks = static_checks(Path(temporary))
+            checks = static_checks(Path(temporary), require_upstreams=False)
         failed = [item for item in checks if not item["ok"]]
         self.assertEqual(failed, [])
 

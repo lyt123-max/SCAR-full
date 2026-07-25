@@ -12,7 +12,28 @@ import numpy as np
 from sklearn.neighbors import LocalOutlierFactor, NearestNeighbors
 from sklearn.preprocessing import StandardScaler
 
-from common import load_common_data, measure_inference, save_standard_outputs, set_seed
+try:
+    from .common import (
+        load_common_data,
+        measure_inference,
+        save_standard_outputs,
+        set_seed,
+    )
+except ImportError:
+    try:
+        from scripts.rebuttal.baselines.common import (
+            load_common_data,
+            measure_inference,
+            save_standard_outputs,
+            set_seed,
+        )
+    except ImportError:
+        from common import (
+            load_common_data,
+            measure_inference,
+            save_standard_outputs,
+            set_seed,
+        )
 
 
 REFERENCE_RATIOS = (0.10, 0.25, 0.50, 1.00)

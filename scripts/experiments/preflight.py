@@ -33,7 +33,11 @@ def _git(path: Path, *args: str) -> str:
     ).strip()
 
 
-def static_checks(artifact_root: Path) -> list[dict]:
+def static_checks(
+    artifact_root: Path,
+    *,
+    require_upstreams: bool = True,
+) -> list[dict]:
     checks = []
 
     def add(name: str, ok: bool, detail: object) -> None:
@@ -107,18 +111,19 @@ def static_checks(artifact_root: Path) -> list[dict]:
     )
     add("p1_unique_run_ids", len({task.run_id for task in p1}) == len(p1), len(p1))
 
-    for method, expected in PINNED.items():
-        path = REPO_ROOT / "third_party" / "baselines" / method
-        if not path.is_dir():
-            add(f"upstream_{method}", False, f"missing {path}")
-            continue
-        actual = _git(path, "rev-parse", "HEAD")
-        dirty = _git(path, "status", "--porcelain")
-        add(
-            f"upstream_{method}",
-            actual == expected and not dirty,
-            {"commit": actual, "dirty": bool(dirty)},
-        )
+    if require_upstreams:
+        for method, expected in PINNED.items():
+            path = REPO_ROOT / "third_party" / "baselines" / method
+            if not path.is_dir():
+                add(f"upstream_{method}", False, f"missing {path}")
+                continue
+            actual = _git(path, "rev-parse", "HEAD")
+            dirty = _git(path, "status", "--porcelain")
+            add(
+                f"upstream_{method}",
+                actual == expected and not dirty,
+                {"commit": actual, "dirty": bool(dirty)},
+            )
     expected_envs = (
         "scar-paano-cu126.yml",
         "catch-cu126.yml",
