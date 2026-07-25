@@ -745,14 +745,6 @@ def _read_tsb_ad_csv(csv_path: Path, metadata: dict[str, Any]) -> tuple[np.ndarr
             f"Invalid TSB-AD train length {train_length} for {csv_path.name} "
             f"with {len(data)} finite rows."
         )
-    positive_indices = np.flatnonzero(labels > 0)
-    first_anomaly = int(metadata["first_anomaly_index"])
-    if positive_indices.size == 0 or int(positive_indices[0]) != first_anomaly:
-        observed = None if positive_indices.size == 0 else int(positive_indices[0])
-        raise ValueError(
-            f"TSB-AD first anomaly mismatch in {csv_path.name}: "
-            f"filename={first_anomaly}, labels={observed}."
-        )
     vus_window = _tsb_ad_vus_window(data[:, 0])
     return data, labels, vus_window, dropped_rows
 
@@ -803,6 +795,12 @@ def _load_tsb_ad_raw_dataset_bundle(dataset: str, data_root: str | Path) -> RawD
     _validate_loaded_arrays(train, test, labels, csv_path.stem)
     training_prefix_anomaly_count = int(np.count_nonzero(labels[:train_length]))
     training_prefix_anomaly_ratio = float(training_prefix_anomaly_count / train_length)
+    positive_indices = np.flatnonzero(labels > 0)
+    declared_first_anomaly = int(metadata["first_anomaly_index"])
+    observed_first_anomaly = (
+        None if positive_indices.size == 0 else int(positive_indices[0])
+    )
+    first_anomaly_matches_labels = observed_first_anomaly == declared_first_anomaly
 
     edition = "M" if test.shape[1] > 1 else "U"
     metadata.update(
@@ -818,9 +816,17 @@ def _load_tsb_ad_raw_dataset_bundle(dataset: str, data_root: str | Path) -> RawD
             "training_prefix_anomaly_count": training_prefix_anomaly_count,
             "training_prefix_anomaly_ratio": training_prefix_anomaly_ratio,
             "training_prefix_contains_anomalies": bool(training_prefix_anomaly_count),
+            "observed_first_anomaly_index": observed_first_anomaly,
+            "first_anomaly_index_matches_labels": first_anomaly_matches_labels,
             "vus_window": int(vus_window),
         }
     )
+    if not first_anomaly_matches_labels:
+        print(
+            f"[TSB-AD] warning: filename first-anomaly metadata in {csv_path.name} "
+            f"declares {declared_first_anomaly}, but labels indicate "
+            f"{observed_first_anomaly}; retaining the official tr_N training boundary."
+        )
     if training_prefix_anomaly_count:
         print(
             f"[TSB-AD] warning: official tr_N prefix in {csv_path.name} contains "

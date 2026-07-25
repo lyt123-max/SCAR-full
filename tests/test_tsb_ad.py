@@ -126,6 +126,28 @@ class TSBADLoaderTests(unittest.TestCase):
             self.assertAlmostEqual(metadata["training_prefix_anomaly_ratio"], 0.05)
             self.assertTrue(metadata["training_prefix_contains_anomalies"])
 
+    def test_loader_audits_first_anomaly_metadata_mismatch(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            file_name = "032_Toy_id_4_WebService_tr_200_1st_240.csv"
+            path = root / file_name
+            with path.open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(["Data", "Label"])
+                for index in range(300):
+                    writer.writerow([index / 10.0, int(100 <= index < 120)])
+
+            bundle = self.data_module._load_tsb_ad_raw_dataset_bundle(file_name, root)
+            metadata = bundle.dataset_metadata
+            self.assertEqual(bundle.train.shape, (200, 1))
+            self.assertEqual(metadata["first_anomaly_index"], 240)
+            self.assertEqual(metadata["observed_first_anomaly_index"], 100)
+            self.assertFalse(metadata["first_anomaly_index_matches_labels"])
+            self.assertEqual(
+                metadata["training_prefix_protocol"],
+                "official_tr_N_boundary",
+            )
+
     def test_normalizer_cannot_observe_post_prefix_values(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
