@@ -243,6 +243,54 @@ class FormalProtocolTests(unittest.TestCase):
         self.assertEqual(len(tasks), 158)
         self.assertTrue(all(task.group.startswith("lite_") for task in tasks))
 
+    def test_lite_anchor_root_reuses_only_stage_a_and_remaps_dependencies(self) -> None:
+        anchor_root = Path("/verified-anchors")
+        tasks = select_tasks(
+            scope="lite",
+            groups=None,
+            artifact_root=Path("/artifacts"),
+            python_exe="python",
+            lite_anchor_root=anchor_root,
+        )
+        anchors = [task for task in tasks if task.group == "lite_anchors"]
+        self.assertEqual(len(anchors), 5)
+        self.assertTrue(all(task.stage == "stage_b_test" for task in anchors))
+        self.assertTrue(
+            all(task.compute_kind == "stage_b_test" for task in anchors)
+        )
+        self.assertTrue(
+            all(
+                task.config["base_experiment_dir"]
+                == str(
+                    anchor_root.resolve()
+                    / f"scar_main_{task.dataset.lower()}_seed42"
+                )
+                for task in anchors
+            )
+        )
+        self.assertTrue(
+            all(
+                Path(task.command[1]).name == "reuse_stage_a.py"
+                for task in anchors
+            )
+        )
+        counts = {
+            kind: sum(task.compute_kind == kind for task in tasks)
+            for kind in ("full_model_fit", "stage_b_test", "analysis")
+        }
+        self.assertEqual(
+            counts,
+            {"full_model_fit": 25, "stage_b_test": 75, "analysis": 58},
+        )
+        anchor_ids = {task.run_id for task in anchors}
+        self.assertTrue(
+            all(
+                any(dependency in anchor_ids for dependency in task.dependencies)
+                for task in tasks
+                if task.group == "lite_efficiency_source"
+            )
+        )
+
 
 class ManifestContractTests(unittest.TestCase):
     def test_stable_run_id_ignores_dictionary_order(self) -> None:

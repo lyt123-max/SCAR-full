@@ -1292,13 +1292,20 @@ def build_p1_tasks(artifact_root: Path, *, python_exe: str) -> list[RunSpec]:
     return [_with_metric_workers(task) for task in tasks]
 
 
-def build_lite_tasks(artifact_root: Path, *, python_exe: str) -> list[RunSpec]:
+def build_lite_tasks(
+    artifact_root: Path,
+    *,
+    python_exe: str,
+    anchor_root: Path | None = None,
+) -> list[RunSpec]:
     """Build the five-dataset, three-day rebuttal protocol.
 
     The lite registry is independent from the complete P0/P1 grids. It keeps
     every reviewer-facing contrast while reducing only redundant interior
-    grid points. Existing compatible anchors can be copied into artifact_root
-    and are then skipped by resume after the normal execution audit.
+    grid points. When ``anchor_root`` is supplied, Stage-A checkpoints from a
+    protocol-compatible run are reused explicitly. Memory construction,
+    calibration, full audit and testing are always recomputed in artifact_root
+    under the current source fingerprint.
     """
 
     artifact_root = Path(artifact_root)
@@ -1310,14 +1317,30 @@ def build_lite_tasks(artifact_root: Path, *, python_exe: str) -> list[RunSpec]:
     e31_q_tasks: dict[str, list[tuple[float, RunSpec]]] = {}
 
     for dataset in MAIN_DATASETS:
+        experiment_name = f"scar_main_{dataset.lower()}_seed42"
+        anchor_config = dict(FORMAL_DATASET_PROFILES[dataset])
+        anchor_stage = "full"
+        anchor_compute_kind = "full_model_fit"
+        if anchor_root is not None:
+            anchor_stage = "stage_b_test"
+            anchor_compute_kind = "stage_b_test"
+            anchor_config.update(
+                {
+                    "base_experiment_dir": str(
+                        Path(anchor_root).resolve() / experiment_name
+                    ),
+                    "bootstrap_protocol": "verified_stage_a_checkpoint_reuse",
+                }
+            )
         anchor = _scar_task(
             artifact_root=artifact_root,
             python_exe=python_exe,
             dataset=dataset,
             group="lite_anchors",
-            compute_kind="full_model_fit",
-            experiment_name=f"scar_main_{dataset.lower()}_seed42",
-            config=dict(FORMAL_DATASET_PROFILES[dataset]),
+            compute_kind=anchor_compute_kind,
+            experiment_name=experiment_name,
+            config=anchor_config,
+            stage=anchor_stage,
         )
         anchors[dataset] = anchor
         tasks.append(anchor)

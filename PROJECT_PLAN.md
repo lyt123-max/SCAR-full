@@ -1007,9 +1007,12 @@ fusion 和 full memory audit；`max_test_sequences` 仅供远程 smoke 显式限
 正式任务保持 `0` 并评估全部 168 条故障序列。中央 manifest 通过环境变量显式传入
 正式 `ARTIFACT_ROOT`，禁止 TEP shell 回退到仓库内默认 `./artifacts`。
 
-三天轻量补充协议使用独立 `--scope lite`，固定 158 项：30 次 full model fit、
-70 次 Stage-B/Test 和 58 次 analysis。若五个正式 anchor 已通过源码、配置、数据和
-产物完整性审计，实际新增 full fit 为 25 次。E10 仅保留污染率 `1%/5%/10%`、
+三天轻量补充协议使用独立 `--scope lite`，固定 158 项：默认从零运行时为 30 次
+full model fit、70 次 Stage-B/Test 和 58 次 analysis。若五个正式 anchor 的
+Stage-A 权重已通过配置、数据、checkpoint 和来源审计，可用
+`--lite-anchor-root` 显式复用；此时五个 anchor 只在新目录重建 memory、fusion、
+full audit 和测试，运行口径变为 25 次 full model fit、75 次 Stage-B/Test 和
+58 次 analysis。旧 run record 不会直接冒充当前提交结果。E10 仅保留污染率 `1%/5%/10%`、
 两折嵌套事件清单，并在 `10%` 做 no/default/stronger 三方对照；E11/E12 直接分析
 E9/E10 full audit。E29 只比较 `L=128/512`，E30 只比较单尺度 `p=8/64` 与默认
 `8+32`，E31 使用 `q=1/0.25/0.10` 和 `top_K=10/20/40` 匹配参数、memory bank 和
@@ -1020,8 +1023,11 @@ Markdown 表和文字摘要。
 ```bash
 python scripts/experiments/rebuttal.py plan --scope lite
 python scripts/experiments/rebuttal.py run --scope lite \
+  --lite-anchor-root /path/to/verified_stage_a_anchors \
   --max-parallel 4 --gpu-devices 0 1 2 3
 python scripts/experiments/rebuttal.py resume --scope lite \
+  --lite-anchor-root /path/to/verified_stage_a_anchors \
   --max-parallel 4 --gpu-devices 0 1 2 3
-python scripts/experiments/rebuttal.py validate --scope lite
+python scripts/experiments/rebuttal.py validate --scope lite \
+  --lite-anchor-root /path/to/verified_stage_a_anchors
 ```

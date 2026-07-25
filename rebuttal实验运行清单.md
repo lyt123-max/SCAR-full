@@ -301,8 +301,10 @@ python scripts/tsb_ad/run_benchmark.py \
 | KNN/LOF | 五主集逐点向量协议 | 10 full/fit |
 | 真实工况表 | 固定 TEP `IDV10`，M1-M6 各选预注册 `cdf_mean` 最高窗口 | 1 analysis |
 
-五个 anchor 若完整可复用，则不重新训练。轻量队列总计 30 full、70 Stage-B/Test、
-58 analysis；扣除复用的五个 anchor 后，新增为 25 full。KNN/LOF 同次输出性能、
+默认从零运行时，轻量队列总计 30 full、70 Stage-B/Test、58 analysis。五个 anchor
+若已通过配置、数据、checkpoint 和来源审计，必须通过 `--lite-anchor-root`
+显式复用 Stage-A；系统仍在新目录重建 memory、fusion、full audit 和测试，不直接
+接收旧 run record。此时口径为 25 full、75 Stage-B/Test、58 analysis。KNN/LOF 同次输出性能、
 1 次预热 + 3 次推理时间、峰值资源、模型/参考库字节，并对 reference/query
 规模生成扩展性表。轻量实验不得生成或引用图片。
 

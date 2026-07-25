@@ -1825,6 +1825,9 @@ Reviewer dk9H 与另外两位审稿人一致，认为当前虽然基线数量多
 当前代码已提供 `scripts/experiments/rebuttal.py
 plan|run|resume|status|validate|collect`。正式任务由中央配置注册表生成，固定 seed
 `42`、禁止 TSB `U/eval_full` 和绘图，按依赖关系复用 Stage-A、memory 与已有分数。
+三天轻量队列可用 `--lite-anchor-root` 指向经过审计的五主集 Stage-A 目录；该入口
+只复用 `stage_a.pt`，随后在当前 artifact 根目录重新执行 memory、fusion、full audit
+和测试，并产生当前源码哈希对应的新 run record，禁止直接把旧记录改写成当前结果。
 五主集 anchor 从首次运行起启用 full memory audit 和资源监控；E9、E10、E38 只执行
 必要的 Stage-B/Test，E11、E12、E39 只分析已有 audit。
 

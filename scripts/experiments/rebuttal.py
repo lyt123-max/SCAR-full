@@ -48,6 +48,7 @@ def select_tasks(
     groups: set[str] | None,
     artifact_root: Path,
     python_exe: str,
+    lite_anchor_root: Path | None = None,
     methods: set[str] | None = None,
     datasets: set[str] | None = None,
 ) -> list[RunSpec]:
@@ -55,7 +56,15 @@ def select_tasks(
         raise ValueError("scope must be one of ac-core, lite, p0, p1, all")
     tasks: list[RunSpec] = []
     if scope == "lite":
-        tasks.extend(build_lite_tasks(artifact_root, python_exe=python_exe))
+        tasks.extend(
+            build_lite_tasks(
+                artifact_root,
+                python_exe=python_exe,
+                anchor_root=lite_anchor_root,
+            )
+        )
+    elif lite_anchor_root is not None:
+        raise ValueError("--lite-anchor-root is only valid with --scope lite.")
     if scope in {"ac-core", "p0", "all"}:
         tasks.extend(build_p0_tasks(artifact_root, python_exe=python_exe))
     if scope in {"p1", "all"}:
@@ -286,6 +295,7 @@ def parse_args() -> argparse.Namespace:
         command.add_argument("--python", default=sys.executable)
         command.add_argument("--python-map", type=Path, default=None)
         command.add_argument("--data-root-map", type=Path, default=None)
+        command.add_argument("--lite-anchor-root", type=Path, default=None)
         command.add_argument("--max-parallel", type=int, default=1)
         command.add_argument("--gpu-devices", nargs="+", default=None)
         command.add_argument("--dry-run", action="store_true")
@@ -300,6 +310,11 @@ def main() -> int:
         groups=set(args.group) if args.group else None,
         artifact_root=args.artifact_root.resolve(),
         python_exe=str(args.python),
+        lite_anchor_root=(
+            args.lite_anchor_root.resolve()
+            if args.lite_anchor_root is not None
+            else None
+        ),
         methods=set(args.method) if args.method else None,
         datasets=set(args.dataset) if args.dataset else None,
     )
