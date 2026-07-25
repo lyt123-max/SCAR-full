@@ -745,11 +745,6 @@ def _read_tsb_ad_csv(csv_path: Path, metadata: dict[str, Any]) -> tuple[np.ndarr
             f"Invalid TSB-AD train length {train_length} for {csv_path.name} "
             f"with {len(data)} finite rows."
         )
-    if np.any(labels[:train_length] != 0):
-        raise ValueError(
-            f"TSB-AD training prefix contains anomaly labels in {csv_path.name}; "
-            "the semisupervised protocol requires a normal prefix."
-        )
     positive_indices = np.flatnonzero(labels > 0)
     first_anomaly = int(metadata["first_anomaly_index"])
     if positive_indices.size == 0 or int(positive_indices[0]) != first_anomaly:
@@ -806,6 +801,8 @@ def _load_tsb_ad_raw_dataset_bundle(dataset: str, data_root: str | Path) -> RawD
     test = np.asarray(full_data, dtype=np.float32)
     labels = np.asarray(full_labels, dtype=np.float32)
     _validate_loaded_arrays(train, test, labels, csv_path.stem)
+    training_prefix_anomaly_count = int(np.count_nonzero(labels[:train_length]))
+    training_prefix_anomaly_ratio = float(training_prefix_anomaly_count / train_length)
 
     edition = "M" if test.shape[1] > 1 else "U"
     metadata.update(
@@ -817,9 +814,19 @@ def _load_tsb_ad_raw_dataset_bundle(dataset: str, data_root: str | Path) -> RawD
             "dropped_nonfinite_rows": int(dropped_rows),
             "evaluation_scope": "full_series",
             "normalization_scope": "training_prefix",
+            "training_prefix_protocol": "official_tr_N_boundary",
+            "training_prefix_anomaly_count": training_prefix_anomaly_count,
+            "training_prefix_anomaly_ratio": training_prefix_anomaly_ratio,
+            "training_prefix_contains_anomalies": bool(training_prefix_anomaly_count),
             "vus_window": int(vus_window),
         }
     )
+    if training_prefix_anomaly_count:
+        print(
+            f"[TSB-AD] warning: official tr_N prefix in {csv_path.name} contains "
+            f"{training_prefix_anomaly_count}/{train_length} anomaly labels; "
+            "retaining the complete prefix to match the official semisupervised split."
+        )
     print(
         f"[TSB-AD-{edition}] {csv_path.name}: train={len(train)} full_eval={len(test)} "
         f"channels={test.shape[1]} vus_window={vus_window}"

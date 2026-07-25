@@ -103,6 +103,28 @@ class TSBADLoaderTests(unittest.TestCase):
             self.assertEqual(int(np.flatnonzero(bundle.test_labels)[0]), 240)
             self.assertEqual(bundle.dataset_metadata["n_channels"], 2)
             self.assertEqual(bundle.dataset_metadata["normalization_scope"], "training_prefix")
+            self.assertEqual(bundle.dataset_metadata["training_prefix_anomaly_count"], 0)
+            self.assertEqual(bundle.dataset_metadata["training_prefix_anomaly_ratio"], 0.0)
+            self.assertFalse(bundle.dataset_metadata["training_prefix_contains_anomalies"])
+
+    def test_loader_retains_contaminated_official_prefix(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            file_name = "120_Toy_id_5_Environment_tr_200_1st_3.csv"
+            path = root / file_name
+            with path.open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(["A", "B", "Label"])
+                for index in range(300):
+                    writer.writerow([index / 10.0, index % 7, int(3 <= index < 13)])
+
+            bundle = self.data_module._load_tsb_ad_raw_dataset_bundle(file_name, root)
+            metadata = bundle.dataset_metadata
+            self.assertEqual(bundle.train.shape, (200, 2))
+            self.assertEqual(metadata["training_prefix_protocol"], "official_tr_N_boundary")
+            self.assertEqual(metadata["training_prefix_anomaly_count"], 10)
+            self.assertAlmostEqual(metadata["training_prefix_anomaly_ratio"], 0.05)
+            self.assertTrue(metadata["training_prefix_contains_anomalies"])
 
     def test_normalizer_cannot_observe_post_prefix_values(self):
         with tempfile.TemporaryDirectory() as temp:
