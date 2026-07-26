@@ -486,6 +486,15 @@ python scripts/tsb_ad/run_benchmark.py --edition U --split eval --seed 42 --devi
 新任务固定源码 `a2048c6`，允许保留迁移审计认可的 `bed731b` 完成产物。正式环境
 继续使用 CPU FAISS；隔离 GPU FAISS 实测更慢且非位级确定，不得混入正式队列。
 
+每卡并发上限只是安全上限，不是必须填满的目标。调度必须同时观察验证通过的总吞吐：
+短序列可在资源门禁内并行；对于 20 万点长序列的两级 prototype-support 阶段，如果
+增加独立 CUDA context 后出现单任务 CPU 推进率和 GPU 利用率同时下降，应立即降低
+该物理卡并发，而不能仅凭显存余量继续补位。D 节点已对四任务并发做可逆实测：
+`039_GHL` 在四并发时约为 `0.456` CPU 核、GPU `0-1%`，单任务时约为 `3.2`
+CPU 核、GPU `4-13%`；当前长尾按 `039_GHL → 043_GHL → 832_Exathlon →
+870_OPPORTUNITY` 单任务接力，并在每项完成后严格验证再恢复下一项。该调度只改变
+进程运行时序，不改变源码、模型、配置、数据、seed、artifact 根或评分协议。
+
 三个节点都在每次派发前执行磁盘保护：数据盘使用率达到 80% 或可用空间低于
 10 GB 时停止新任务，但不得删除源码、原始数据或有效产物。每个 completed 目录
 必须通过 `_test_artifact_error`，全部 `test_scores*.npy` 必须与
