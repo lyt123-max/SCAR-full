@@ -349,10 +349,20 @@ E11 不再启动独立训练，直接从 E9 的 full memory audit 产物计算�
 E12 不再启动独立训练，直接从 E10 的污染 manifest、重构误差和 memory audit 产物计算：
 
 1. 在有标签的合成异常或 TEP 故障中统计重构误差；
-2. 将异常按重构误差分位数分组；
-3. 报告低误差异常进入 memory bank 的比例；
+2. 在每个运行、每个 patch scale 内按重构误差分为
+   `low_q25`、`mid_q25_q75`、`high_q75`，同时保留 `all` 总体口径；
+3. 报告各误差组经过 purification 后和 coreset 后的 memory-bank
+   存活率，跨 fold 汇总必须按 patch 数加权；
 4. 对比进入 memory bank 后对最终 AUROC/AP 的影响；
 5. 说明 purification 只是过滤明显高误差污染，而不是完整 anomaly-removal mechanism。
+
+E12 后处理必须从 `contamination_protocol.json` 读取
+`injected_provenance_offset`、`injection_events` 和
+`injected_test_window_starts`。若 offset 缺失，只允许在
+`memory_audit_state.npz` 满足“前段为 clean、尾段与注入窗口逐项对应，且两者
+`raw_start` 差值为同一常数”时恢复；恢复值写入隔离 sidecar，不覆盖原 protocol。
+任一误差组 `count=0`、关键比例为非有限值、长度不一致或分位组不完整时，collector
+必须失败，不能把仅生成 CSV 视为科学完成。
 
 ### 需要新增的表格
 

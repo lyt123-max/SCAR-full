@@ -42,11 +42,19 @@ python scripts/rebuttal/muqn/run_contamination_sweep.py \
   --n_folds 3 --seed 42
 
 python scripts/rebuttal/muqn/analyze_purification_audit.py \
-  --experiment_dir artifacts/rebuttal_muqn_contamination/<generated-experiment>
+  --experiment_dir artifacts/rebuttal_muqn_contamination/<generated-experiment> \
+  --low_error_quantile 0.25 --high_error_quantile 0.75
 ```
 
 先使用 `--dry_run` 检查每折事件数、候选窗口数和实际污染比例。正式污染实验会重建
 Stage B 和测试，不会重训 Stage A。
+
+E12 在每个运行和 patch scale 内输出 `all`、`low_q25`、
+`mid_q25_q75`、`high_q75` 四种异常重构误差口径，并分别报告 purification
+与 coreset 后的保留率。若旧 E10 protocol 缺少 provenance offset，分析器仅在
+memory-audit state 尾部与注入窗口逐项对应且可恢复唯一 offset 时继续，并在输出
+目录生成 `recovered_contamination_protocol.json`；原 protocol 不会被修改。
+E12 collector 对零分母、非有限比例和缺失分位组采用硬失败。
 
 ## 3. 外部基线
 
