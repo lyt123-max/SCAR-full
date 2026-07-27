@@ -55,6 +55,8 @@ E12 在每个运行和 patch scale 内输出 `all`、`low_q25`、
 memory-audit state 尾部与注入窗口逐项对应且可恢复唯一 offset 时继续，并在输出
 目录生成 `recovered_contamination_protocol.json`；原 protocol 不会被修改。
 E12 collector 对零分母、非有限比例和缺失分位组采用硬失败。
+仅修复或重新汇总 E12 时使用 `collect_purification_sweep.py --skip-e11`，
+避免把 E12 的有效性错误地绑定到无关的 E9 audit 完整性。
 
 ## 3. 外部基线
 

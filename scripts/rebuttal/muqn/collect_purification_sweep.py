@@ -144,7 +144,7 @@ def aggregate_e12_rows(rows: list[dict]) -> list[dict]:
     return summaries
 
 
-def main() -> None:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Collect E11/E12 from E9/E10 audits.")
     parser.add_argument("--artifact-root", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
@@ -158,32 +158,42 @@ def main() -> None:
         action="store_true",
         help="Use default purification at 1/5% and no/default/strong at 10%.",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--skip-e11",
+        action="store_true",
+        help="Collect only E12 without requiring E9 audit inputs.",
+    )
+    return parser.parse_args(argv)
+
+
+def main() -> None:
+    args = parse_args()
     root = args.artifact_root.resolve()
     args.output_dir.mkdir(parents=True, exist_ok=True)
     e11_rows = []
     e12_rows = []
     for dataset in args.datasets:
-        for ratio in args.e9_ratios:
-            experiment = (
-                root / f"scar_main_{dataset.lower()}_seed42"
-                if ratio == 0.02
-                else root
-                / f"{args.experiment_prefix}_e9_{dataset.lower()}_clean_{token(ratio)}"
-            )
-            detail = args.output_dir / "details" / f"e9_{dataset}_{token(ratio)}"
-            payload = _analyze(experiment, detail)
-            for row in payload["groups"]:
-                if row["group"] == "rare_normal":
-                    e11_rows.append(
-                        {
-                            "dataset": dataset,
-                            "clean_ratio": ratio,
-                            "rarity_quantile": 0.90,
-                            "rarity_threshold": payload["rarity_threshold"],
-                            **row,
-                        }
-                    )
+        if not args.skip_e11:
+            for ratio in args.e9_ratios:
+                experiment = (
+                    root / f"scar_main_{dataset.lower()}_seed42"
+                    if ratio == 0.02
+                    else root
+                    / f"{args.experiment_prefix}_e9_{dataset.lower()}_clean_{token(ratio)}"
+                )
+                detail = args.output_dir / "details" / f"e9_{dataset}_{token(ratio)}"
+                payload = _analyze(experiment, detail)
+                for row in payload["groups"]:
+                    if row["group"] == "rare_normal":
+                        e11_rows.append(
+                            {
+                                "dataset": dataset,
+                                "clean_ratio": ratio,
+                                "rarity_quantile": 0.90,
+                                "rarity_threshold": payload["rarity_threshold"],
+                                **row,
+                            }
+                        )
         for fold in range(args.n_folds):
             for contamination in args.e10_ratios:
                 if args.lightweight_e10:
@@ -213,7 +223,8 @@ def main() -> None:
                             )
     validate_e12_rows(e12_rows)
     e12_summary_rows = aggregate_e12_rows(e12_rows)
-    _write(args.output_dir / "e11_rare_normal.csv", e11_rows)
+    if e11_rows:
+        _write(args.output_dir / "e11_rare_normal.csv", e11_rows)
     _write(args.output_dir / "e12_low_error_survival.csv", e12_rows)
     _write(
         args.output_dir / "e12_low_error_survival_summary.csv",

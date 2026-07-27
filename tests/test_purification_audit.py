@@ -12,6 +12,7 @@ from scripts.rebuttal.muqn.analyze_purification_audit import (
 )
 from scripts.rebuttal.muqn.collect_purification_sweep import (
     aggregate_e12_rows,
+    parse_args,
     validate_e12_rows,
 )
 
@@ -162,3 +163,17 @@ def test_e12_fold_aggregation_is_patch_weighted() -> None:
     assert summary[0]["count"] == 40
     assert summary[0]["purification_retention"] == 0.25
     assert summary[0]["final_retention"] == 0.125
+
+
+def test_collector_can_skip_unrelated_e11_inputs(tmp_path: Path) -> None:
+    args = parse_args(
+        [
+            "--artifact-root",
+            str(tmp_path / "artifacts"),
+            "--output-dir",
+            str(tmp_path / "corrected"),
+            "--skip-e11",
+        ]
+    )
+
+    assert args.skip_e11 is True
